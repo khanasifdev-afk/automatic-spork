@@ -13,9 +13,12 @@ import {
   Loader2,
   XCircle,
   Search,
+  Download,
+  ExternalLink,
 } from 'lucide-react';
-import { Scene, WorkflowOptions, SceneSearchState, ImageSearchState, StockMediaType } from '../../types';
+import { Scene, WorkflowOptions, SceneSearchState, ImageSearchState, ImageCandidate, StockMediaType } from '../../types';
 import { SceneClipsCard } from './SceneClipsCard';
+import { triggerBrowserDownload } from '../../services/zipBuilder';
 
 interface ClipsReviewProps {
   scenes: Scene[];
@@ -366,6 +369,10 @@ interface ImageResultsCardProps {
 const ImageResultsCard: React.FC<ImageResultsCardProps> = ({ scene, imageState, onReSearch }) => {
   const [editingQuery, setEditingQuery] = useState(false);
   const [draftQuery, setDraftQuery] = useState('');
+  const [lightboxCandidate, setLightboxCandidate] = useState<{
+    candidate: ImageCandidate;
+    label: string;
+  } | null>(null);
 
   const status = imageState?.status ?? 'idle';
   const candidates = imageState?.candidates ?? [];
@@ -466,33 +473,201 @@ const ImageResultsCard: React.FC<ImageResultsCardProps> = ({ scene, imageState, 
           {candidates.length === 0 ? (
             <p className="image-no-results">No images found. Try editing the search query above.</p>
           ) : (
-            candidates.map((candidate, idx) => (
-              <div key={candidate.pexelsPhotoId} className="image-candidate-item">
-                <span className="image-candidate-label">
-                  {String.fromCharCode(65 + idx)}
-                </span>
-                <img
-                  src={candidate.previewImageUrl}
-                  alt={`Image ${String.fromCharCode(65 + idx)}`}
-                  className="image-candidate-thumb"
-                  loading="lazy"
-                />
-                <div className="image-candidate-meta">
-                  <span className="image-candidate-dims">
-                    {candidate.width} × {candidate.height}
-                  </span>
-                  <a
-                    href={candidate.sourceUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="image-pexels-link"
+            candidates.map((candidate, idx) => {
+              const label = candidate.candidateLabel || String.fromCharCode(65 + idx);
+              const formatResolution = (w: number, h: number) => {
+                if (w >= 3840 || h >= 2160) return '4K';
+                if (w >= 1920 || h >= 1080) return '1080p';
+                if (w >= 1280 || h >= 720) return '720p';
+                return `${w}×${h}`;
+              };
+              const orientationText = candidate.width >= candidate.height ? 'Landscape' : 'Portrait';
+
+              const handleDownloadImage = async (e: React.MouseEvent) => {
+                e.stopPropagation();
+                const downloadUrl = candidate.previewImageUrl || candidate.files[0]?.url;
+                if (!downloadUrl) return;
+                const filename = `image-${candidate.pexelsPhotoId}-${label}.jpg`;
+                try {
+                  const response = await fetch(downloadUrl);
+                  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                  const blob = await response.blob();
+                  const objectUrl = URL.createObjectURL(blob);
+                  triggerBrowserDownload(objectUrl, filename);
+                  setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+                } catch {
+                  triggerBrowserDownload(downloadUrl, filename);
+                }
+              };
+
+              const handleOpenExternal = (e: React.MouseEvent) => {
+                e.stopPropagation();
+                const downloadUrl = candidate.previewImageUrl || candidate.sourceUrl;
+                if (downloadUrl) {
+                  window.open(downloadUrl, '_blank', 'noopener,noreferrer');
+                }
+              };
+
+              return (
+                <div key={candidate.pexelsPhotoId} className="clip-candidate-card" id={`image-card-${candidate.pexelsPhotoId}`}>
+                  <div
+                    className="clip-media-container"
+                    style={{ aspectRatio: candidate.width >= candidate.height ? '16 / 9' : '9 / 16', cursor: 'pointer' }}
+                    onClick={() => setLightboxCandidate({ candidate, label })}
+                    title={`Click to view full image (Option ${label})`}
                   >
-                    Pexels ↗
-                  </a>
+                    <img
+                      src={candidate.previewImageUrl}
+                      alt={`Image Option ${label} by ${candidate.creatorName}`}
+                      className="clip-media-image"
+                      loading="lazy"
+                    />
+                    <div className="clip-candidate-label-badge" title={`Option ${label}`}>
+                      <span>Option {label}</span>
+                    </div>
+                    <button
+                      type="button"
+                      className="clip-overlay-download-btn"
+                      onClick={handleDownloadImage}
+                      title={`Download Option ${label} image`}
+                      aria-label={`Download Option ${label} image`}
+                    >
+                      <Download size={12} />
+                    </button>
+                  </div>
+
+                  <div className="clip-card-details">
+                    <div className="clip-card-tags">
+                      <span className={`badge-confidence confidence-${candidate.confidence || 'fair'}`}>
+                        {(candidate.confidence || 'fair').toUpperCase()}
+                      </span>
+                      <span className="clip-meta-tag">{formatResolution(candidate.width, candidate.height)}</span>
+                      <span className="clip-meta-tag">{orientationText}</span>
+                    </div>
+                    <div className="clip-creator-info">
+                      <a
+                        href={candidate.sourceUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="clip-creator-link"
+                        onClick={handleOpenExternal}
+                        title={`View photo by ${candidate.creatorName} on Pexels`}
+                      >
+                        <ExternalLink size={12} />
+                        <span>{candidate.creatorName}</span>
+                      </a>
+                    </div>
+                  </div>
                 </div>
-              </div>
-            ))
+              );
+            })
           )}
+        </div>
+      )}
+
+      {/* Image Lightbox Modal */}
+      {lightboxCandidate && (
+        <div
+          className="modal-overlay"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setLightboxCandidate(null)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(15, 23, 42, 0.75)',
+            backdropFilter: 'blur(4px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 999,
+            padding: '1.5rem',
+          }}
+        >
+          <div
+            className="modal-box"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              maxWidth: '850px',
+              width: '100%',
+              background: 'var(--color-bg-card)',
+              borderRadius: 'var(--radius-lg)',
+              padding: '1.5rem',
+              boxShadow: 'var(--shadow-xl)',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                marginBottom: '1rem',
+                borderBottom: '1px solid var(--color-border)',
+                paddingBottom: '0.75rem',
+              }}
+            >
+              <h3 className="modal-title" style={{ margin: 0, fontSize: 'var(--font-size-base)', fontWeight: 600 }}>
+                Scene {scene.sequence} — Option {lightboxCandidate.label} Preview
+              </h3>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setLightboxCandidate(null)}
+              >
+                Close
+              </button>
+            </div>
+
+            <div style={{ textAlign: 'center', padding: '0.5rem 0' }}>
+              <img
+                src={lightboxCandidate.candidate.previewImageUrl}
+                alt={`Option ${lightboxCandidate.label}`}
+                style={{
+                  maxWidth: '100%',
+                  maxHeight: '65vh',
+                  objectFit: 'contain',
+                  borderRadius: 'var(--radius-md)',
+                  boxShadow: 'var(--shadow-md)',
+                }}
+              />
+              <p style={{ marginTop: '0.75rem', fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', margin: 0 }}>
+                {lightboxCandidate.candidate.width} × {lightboxCandidate.candidate.height} · Photo by {lightboxCandidate.candidate.creatorName}
+              </p>
+            </div>
+
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                marginTop: '1.25rem',
+                paddingTop: '0.75rem',
+                borderTop: '1px solid var(--color-border)',
+              }}
+            >
+              <a
+                href={lightboxCandidate.candidate.sourceUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn btn-secondary btn-sm"
+              >
+                <ExternalLink size={14} />
+                <span>View on Pexels ↗</span>
+              </a>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={() => {
+                  const url = lightboxCandidate.candidate.previewImageUrl;
+                  const filename = `image-${lightboxCandidate.candidate.pexelsPhotoId}-${lightboxCandidate.label}.jpg`;
+                  triggerBrowserDownload(url, filename);
+                }}
+              >
+                <Download size={14} />
+                <span>Download Photo</span>
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
