@@ -1,6 +1,6 @@
 /**
  * Browser-based ZIP archive generator using JSZip.
- * Assembles video files, script segments, manifest, and credits into youtube-video-clips.zip.
+ * Assembles video files, image files, script segments, manifest, and credits into youtube-video-clips.zip.
  * Follows specifications in docs/features/feature-04-download-export.md section 10.
  */
 
@@ -18,9 +18,16 @@ export interface ZipAudioFile {
   blob: Blob;
 }
 
+export interface ZipImageFile {
+  filename: string;
+  blob: Blob;
+}
+
 export interface ZipPackageFiles {
   videos: ZipVideoFile[];
   voices?: ZipAudioFile[];
+  /** Still image files (001-A.jpg...001-E.jpg) when images are enabled. */
+  images?: ZipImageFile[];
   scriptSegmentsText: string;
   manifestCsvText: string;
   creditsText: string;
@@ -31,8 +38,9 @@ export type ZipProgressCallback = (percent: number) => void;
 /**
  * Builds the export ZIP package directly in browser memory.
  * Files are arranged flat at the root of the archive:
- * - 001.mp4, 002.mp4...
- * - 001.mp3, 002.mp3...
+ * - 001-A.mp4...001-F.mp4 (videos)
+ * - 001-A.jpg...001-E.jpg (images, when enabled)
+ * - 001.mp3, 002.mp3... (voices)
  * - script-segments.txt
  * - manifest.csv
  * - credits.txt
@@ -46,6 +54,13 @@ export async function buildZipPackage(
   // Add video MP4 files
   for (const video of packageFiles.videos) {
     zip.file(video.filename, video.blob);
+  }
+
+  // Add image files when present
+  if (packageFiles.images) {
+    for (const img of packageFiles.images) {
+      zip.file(img.filename, img.blob);
+    }
   }
 
   // Add voice MP3 files

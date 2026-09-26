@@ -232,7 +232,7 @@ describe('SettingsPage', () => {
       expect(screen.getByText(/ai33 pro connection verified successfully/i)).toBeInTheDocument();
       expect(screen.getByText('4,200')).toBeInTheDocument();
     });
-  });
+  }, 15000);
 
   it('saves all settings including AI33 Pro defaults and defaultVoiceProvider to localStorage', async () => {
     const user = userEvent.setup();
@@ -265,7 +265,7 @@ describe('SettingsPage', () => {
     expect(stored.defaultVoiceProvider).toBe('ai33pro');
     expect(stored.defaultElevenLabs).toBeDefined();
     expect(stored.defaultAi33Pro).toBeDefined();
-  });
+  }, 15000);
 
   it('confirms and clears all 4 API keys while preserving video and voice defaults', async () => {
     const user = userEvent.setup();

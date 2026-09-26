@@ -16,6 +16,7 @@ import {
   AlertTriangle,
   Play,
   Square,
+  Image,
 } from 'lucide-react';
 import {
   WorkflowOptions,
@@ -28,6 +29,7 @@ import {
   Ai33Voice,
   Ai33SourceProvider,
   Ai33ProOptions,
+  StockMediaType,
 } from '../../types';
 
 interface JobOptionsProps {
@@ -167,6 +169,28 @@ export const JobOptions: React.FC<JobOptionsProps> = ({
 
 
   const videoSummary = `${options.orientation === 'landscape' ? 'Landscape (16:9)' : 'Portrait (9:16)'} · ${options.quality.toUpperCase()} · ${options.sceneLength}`;
+  const currentMediaType: StockMediaType = options.stockMediaType ?? 'videos';
+  const wantsVideos = currentMediaType === 'videos' || currentMediaType === 'both';
+  const wantsImages = currentMediaType === 'images' || currentMediaType === 'both';
+
+  const handleMediaTypeToggle = (type: 'videos' | 'images', checked: boolean) => {
+    let next: StockMediaType;
+    if (type === 'videos') {
+      if (checked) {
+        next = wantsImages ? 'both' : 'videos';
+      } else {
+        // Must keep at least one
+        next = wantsImages ? 'images' : 'videos';
+      }
+    } else {
+      if (checked) {
+        next = wantsVideos ? 'both' : 'images';
+      } else {
+        next = wantsVideos ? 'videos' : 'videos'; // fallback to videos
+      }
+    }
+    onChange({ stockMediaType: next });
+  };
   const voiceSummary =
     activeProvider === 'ai33pro'
       ? `AI33 Pro (${options.ai33Pro?.sourceProvider || 'elevenlabs'}) · ${selectedAi33VoiceName} · ${(options.ai33Pro?.speed ?? 1.0).toFixed(2)}x`
@@ -269,6 +293,40 @@ export const JobOptions: React.FC<JobOptionsProps> = ({
                     <option value="2-4s">2-4 seconds (Fast Shorts/TikTok pacing)</option>
                     <option value="7-10s">7-10 seconds (Calm/Documentary pacing)</option>
                   </select>
+                </div>
+
+                {/* Stock Media Type */}
+                <div className="job-option-group" style={{ gridColumn: '1 / -1' }}>
+                  <label className="job-option-label" id="job-media-type-label">
+                    <Image size={14} className="inline-icon" aria-hidden="true" /> Stock Media Type
+                  </label>
+                  <p className="job-option-hint">Choose which Pexels media to fetch per scene. Images are capped at 5; videos at 6.</p>
+                  <div className="media-type-checkboxes" role="group" aria-labelledby="job-media-type-label">
+                    <label className={`media-type-checkbox-label ${wantsVideos ? 'active' : ''}`}>
+                      <input
+                        id="job-media-videos"
+                        type="checkbox"
+                        className="media-type-checkbox"
+                        checked={wantsVideos}
+                        disabled={disabled || (wantsVideos && !wantsImages)}
+                        onChange={(e) => handleMediaTypeToggle('videos', e.target.checked)}
+                      />
+                      <Video size={15} />
+                      <span>Videos <span className="badge badge-subtle">6 per scene</span></span>
+                    </label>
+                    <label className={`media-type-checkbox-label ${wantsImages ? 'active' : ''}`}>
+                      <input
+                        id="job-media-images"
+                        type="checkbox"
+                        className="media-type-checkbox"
+                        checked={wantsImages}
+                        disabled={disabled}
+                        onChange={(e) => handleMediaTypeToggle('images', e.target.checked)}
+                      />
+                      <Image size={15} />
+                      <span>Images <span className="badge badge-subtle">5 per scene</span></span>
+                    </label>
+                  </div>
                 </div>
               </div>
             </div>

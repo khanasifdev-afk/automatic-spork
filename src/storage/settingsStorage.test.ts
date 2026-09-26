@@ -162,6 +162,7 @@ describe('settingsStorage', () => {
         voiceId: 'minimax_male-qn-qingse',
         speed: 1.25,
       },
+      defaultStockMediaType: 'both',
     };
 
     saveSettings(custom);
@@ -177,6 +178,7 @@ describe('settingsStorage', () => {
       'defaultOrientation',
       'defaultQuality',
       'defaultSceneLength',
+      'defaultStockMediaType',
       'defaultVoiceProvider',
       'elevenLabsApiKey',
       'geminiApiKey',
@@ -209,6 +211,7 @@ describe('settingsStorage', () => {
         voiceId: 'edge_en-US-GuyNeural',
         speed: 0.9,
       },
+      defaultStockMediaType: 'videos',
     };
     saveSettings(initial);
 
@@ -251,6 +254,7 @@ describe('settingsStorage', () => {
         voiceId: 'kokoro_af_bella',
         speed: 1.1,
       },
+      defaultStockMediaType: 'images',
     };
     saveSettings(initial);
 
@@ -292,6 +296,7 @@ describe('settingsStorage', () => {
         voiceId: 'fishaudio_custom_1',
         speed: 1.4,
       },
+      defaultStockMediaType: 'videos',
     };
     saveSettings(initial);
 

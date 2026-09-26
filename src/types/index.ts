@@ -7,6 +7,14 @@ export type OutputOrientation = 'landscape' | 'portrait';
 export type VideoQuality = '720p' | '1080p' | '4k';
 export type TargetSceneLength = 'short' | 'standard' | 'long';
 
+/**
+ * Which type(s) of Pexels stock media to fetch per scene.
+ * 'videos'  — only MP4 clips (original behaviour, 6 per scene)
+ * 'images'  — only JPEG/PNG stills (up to 5 per scene per project-plan)
+ * 'both'    — both videos and images
+ */
+export type StockMediaType = 'videos' | 'images' | 'both';
+
 export type ElevenLabsOutputFormat =
   | 'mp3_44100_64'
   | 'mp3_44100_96'
@@ -52,6 +60,8 @@ export type SavedSettings = {
   defaultVoiceProvider: VoiceProvider;
   defaultElevenLabs: ElevenLabsOptions;
   defaultAi33Pro: Ai33ProOptions;
+  /** Which Pexels media type(s) to fetch: videos, images, or both. Default: 'videos'. */
+  defaultStockMediaType: StockMediaType;
 };
 
 export type KeyTestState =
@@ -181,6 +191,8 @@ export type WorkflowOptions = {
   voiceProvider?: VoiceProvider;
   elevenLabs: ElevenLabsOptions;
   ai33Pro?: Ai33ProOptions;
+  /** Which stock media Pexels should fetch for each scene. Defaults to 'videos'. */
+  stockMediaType?: StockMediaType;
 };
 
 export type Scene = {
@@ -192,6 +204,65 @@ export type Scene = {
   fallbackQueries: string[];
   avoidTerms: string[];
   estimatedSeconds: number;
+};
+
+// ---------------------------------------------------------------------------
+// Image candidate types (Pexels Photos API, capped at 5 per scene)
+// ---------------------------------------------------------------------------
+
+export type ImageCandidateLabel = 'A' | 'B' | 'C' | 'D' | 'E';
+
+export type ImageFileVariant = {
+  url: string;
+  width: number;
+  height: number;
+  label: 'original' | 'large2x' | 'large' | 'medium' | 'small';
+};
+
+export type ImageCandidate = {
+  id: string;
+  pexelsPhotoId: number;
+  sourceUrl: string;
+  creatorName: string;
+  creatorUrl: string;
+  previewImageUrl: string;
+  width: number;
+  height: number;
+  files: ImageFileVariant[];
+  matchedQuery: string;
+  score: number;
+  confidence: 'strong' | 'fair' | 'weak';
+  candidateLabel?: ImageCandidateLabel;
+};
+
+export type ImageSearchState = {
+  status: 'idle' | 'searching' | 'ready' | 'empty' | 'error';
+  query: string;
+  candidates: ImageCandidate[];
+  error: string | null;
+};
+
+// ---------------------------------------------------------------------------
+// Bulk workflow status
+// ---------------------------------------------------------------------------
+
+export type BulkWorkflowStage =
+  | 'idle'
+  | 'analyzing'
+  | 'generating-voices'
+  | 'searching-media'
+  | 'packaging'
+  | 'complete'
+  | 'failed'
+  | 'cancelled';
+
+export type BulkWorkflowStatus = {
+  stage: BulkWorkflowStage;
+  /** 0–100 overall progress percentage */
+  progress: number;
+  /** Human-readable status message */
+  message: string;
+  error: string | null;
 };
 
 export type ClipFileVariant = {

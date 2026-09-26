@@ -5,6 +5,7 @@ import { useWorkflowStore } from '../store/workflowStore';
 import { loadSettings } from '../storage/settingsStorage';
 import { JobOptions } from '../components/workflow/JobOptions';
 import { ScriptInput } from '../components/workflow/ScriptInput';
+import { BulkWorkflowPanel } from '../components/workflow/BulkWorkflowPanel';
 import { SceneEditor } from '../components/workflow/SceneEditor';
 import { VoiceGenerationPanel } from '../components/workflow/VoiceGenerationPanel';
 import { ClipsReview } from '../components/workflow/ClipsReview';
@@ -23,11 +24,13 @@ export const WorkspacePage: React.FC = () => {
     options,
     scenes,
     searchStateByScene,
+    imageSearchStateByScene,
     voiceStateByScene,
     isVoiceBatchRunning,
     excludedSceneIds,
     error,
     exportState,
+    bulkWorkflowStatus,
     initializeFromSettings,
     setScript,
     setOptions,
@@ -49,6 +52,8 @@ export const WorkspacePage: React.FC = () => {
     proceedToClips,
     searchAllScenes,
     searchScene,
+    searchAllImages,
+    searchSceneImages,
     excludeScene,
     restoreScene,
     canProceedToPackaging,
@@ -57,6 +62,8 @@ export const WorkspacePage: React.FC = () => {
     cancelExport,
     retryClipDownload,
     downloadZipFile,
+    runBulkWorkflow,
+    cancelBulkWorkflow,
   } = useWorkflowStore();
 
   const [geminiApiKey, setGeminiApiKey] = useState('');
@@ -234,6 +241,16 @@ export const WorkspacePage: React.FC = () => {
             disabled={status === 'analyzing'}
           />
 
+          <BulkWorkflowPanel
+            status={bulkWorkflowStatus}
+            hasScript={script.trim().length > 0}
+            hasGeminiKey={Boolean(geminiApiKey.trim())}
+            hasPexelsKey={Boolean(pexelsApiKey.trim())}
+            hasVoiceKey={Boolean(activeVoiceApiKey.trim())}
+            onRun={() => runBulkWorkflow(geminiApiKey, activeVoiceApiKey, pexelsApiKey)}
+            onCancel={cancelBulkWorkflow}
+          />
+
           <ScriptInput
             script={script}
             hasGeminiKey={Boolean(geminiApiKey.trim())}
@@ -298,10 +315,13 @@ export const WorkspacePage: React.FC = () => {
             scenes={scenes}
             options={options}
             searchStateByScene={searchStateByScene}
+            imageSearchStateByScene={imageSearchStateByScene}
             excludedSceneIds={excludedSceneIds}
             pexelsApiKey={pexelsApiKey}
             onSearchAll={searchAllScenes}
             onSearchScene={searchScene}
+            onSearchAllImages={searchAllImages}
+            onSearchSceneImages={searchSceneImages}
             onExcludeScene={excludeScene}
             onRestoreScene={restoreScene}
             canProceedToPackaging={canProceedToPackaging}

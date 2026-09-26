@@ -45,6 +45,21 @@ export function getMp3Filename(sequence: number, totalCount: number): string {
 }
 
 /**
+ * Returns the standardized sequential image filename (e.g., "001-A.jpg").
+ * Follows the same zero-padded + candidate-label convention as MP4 files.
+ * Extension defaults to 'jpg' but can be overridden.
+ */
+export function getImageFilename(
+  sequence: number,
+  totalCount: number,
+  candidateLabel: string,
+  ext: string = 'jpg'
+): string {
+  const padded = formatSequenceNumber(sequence, totalCount);
+  return `${padded}-${candidateLabel}.${ext}`;
+}
+
+/**
  * Normalizes script text for export:
  * - Replaces internal line breaks (\r\n, \r, \n) and repeated whitespace with a single space
  * - Trims leading and trailing whitespace

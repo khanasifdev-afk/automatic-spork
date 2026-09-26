@@ -8,6 +8,7 @@ import {
   VoiceProvider,
   Ai33SourceProvider,
   Ai33ProOptions,
+  StockMediaType,
 } from '../types';
 
 export const STORAGE_KEY_V1 = 'youtube-stock-video-generator.settings.v1';
@@ -42,12 +43,14 @@ export const DEFAULT_SETTINGS: SavedSettings = {
   defaultVoiceProvider: 'elevenlabs',
   defaultElevenLabs: DEFAULT_ELEVENLABS_SETTINGS,
   defaultAi33Pro: DEFAULT_AI33PRO_SETTINGS,
+  defaultStockMediaType: 'videos',
 };
 
 const VALID_ORIENTATIONS: OutputOrientation[] = ['landscape', 'portrait'];
 const VALID_QUALITIES: VideoQuality[] = ['720p', '1080p', '4k'];
 const VALID_SCENE_LENGTHS: TargetSceneLength[] = ['short', 'standard', 'long'];
 const VALID_VOICE_PROVIDERS: VoiceProvider[] = ['elevenlabs', 'ai33pro'];
+const VALID_STOCK_MEDIA_TYPES: StockMediaType[] = ['videos', 'images', 'both'];
 const VALID_AI33_SOURCE_PROVIDERS: Ai33SourceProvider[] = [
   'elevenlabs',
   'minimax',
@@ -155,6 +158,12 @@ export function sanitizeSettings(data: unknown): SavedSettings {
   const defaultElevenLabs = sanitizeElevenLabsSettings(obj.defaultElevenLabs);
   const defaultAi33Pro = sanitizeAi33ProSettings(obj.defaultAi33Pro);
 
+  const defaultStockMediaType: StockMediaType = VALID_STOCK_MEDIA_TYPES.includes(
+    obj.defaultStockMediaType as StockMediaType
+  )
+    ? (obj.defaultStockMediaType as StockMediaType)
+    : DEFAULT_SETTINGS.defaultStockMediaType;
+
   return {
     geminiApiKey,
     pexelsApiKey,
@@ -166,6 +175,7 @@ export function sanitizeSettings(data: unknown): SavedSettings {
     defaultVoiceProvider,
     defaultElevenLabs,
     defaultAi33Pro,
+    defaultStockMediaType,
   };
 }
 

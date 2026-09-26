@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useTransition } from 'react';
 import {
   Film,
+  Image,
   CheckCircle2,
   EyeOff,
   ArrowLeft,
@@ -9,18 +10,24 @@ import {
   AlertTriangle,
   RefreshCw,
   Settings,
+  Loader2,
+  XCircle,
+  Search,
 } from 'lucide-react';
-import { Scene, WorkflowOptions, SceneSearchState } from '../../types';
+import { Scene, WorkflowOptions, SceneSearchState, ImageSearchState, StockMediaType } from '../../types';
 import { SceneClipsCard } from './SceneClipsCard';
 
 interface ClipsReviewProps {
   scenes: Scene[];
   options: WorkflowOptions;
   searchStateByScene: Record<string, SceneSearchState>;
+  imageSearchStateByScene?: Record<string, ImageSearchState>;
   excludedSceneIds: string[];
   pexelsApiKey: string;
   onSearchAll: (apiKey: string) => Promise<void>;
   onSearchScene: (sceneId: string, apiKey: string, customQuery?: string) => Promise<void>;
+  onSearchAllImages?: (apiKey: string) => Promise<void>;
+  onSearchSceneImages?: (sceneId: string, apiKey: string, customQuery?: string) => Promise<void>;
   onExcludeScene: (sceneId: string) => void;
   onRestoreScene: (sceneId: string) => void;
   canProceedToPackaging: () => boolean;
@@ -35,10 +42,13 @@ export const ClipsReview: React.FC<ClipsReviewProps> = ({
   scenes,
   options,
   searchStateByScene,
+  imageSearchStateByScene = {},
   excludedSceneIds,
   pexelsApiKey,
   onSearchAll,
   onSearchScene,
+  onSearchAllImages,
+  onSearchSceneImages,
   onExcludeScene,
   onRestoreScene,
   canProceedToPackaging,
@@ -54,6 +64,10 @@ export const ClipsReview: React.FC<ClipsReviewProps> = ({
   const [hasAutoSearched, setHasAutoSearched] = useState(false);
   const [confirmationNotice, setConfirmationNotice] = useState<string | null>(null);
 
+  const stockMediaType: StockMediaType = options.stockMediaType ?? 'videos';
+  const needsVideos = stockMediaType === 'videos' || stockMediaType === 'both';
+  const needsImages = stockMediaType === 'images' || stockMediaType === 'both';
+
   const includedScenes = scenes.filter((s) => !excludedSceneIds.includes(s.id));
   const readyScenesCount = includedScenes.filter((s) => {
     const st = searchStateByScene[s.id];
@@ -65,20 +79,25 @@ export const ClipsReview: React.FC<ClipsReviewProps> = ({
 
   const hasApiKey = Boolean(pexelsApiKey.trim());
 
-  // Auto-search unsearched scenes on first mount if API key is present
+  // Auto-search on first mount
   useEffect(() => {
     if (!hasAutoSearched && hasApiKey && scenes.length > 0) {
-      const needsSearch = scenes.some(
+      const needsVideoSearch = needsVideos && scenes.some(
         (s) => !searchStateByScene[s.id] || searchStateByScene[s.id].status === 'idle'
       );
-      if (needsSearch) {
+      const needsImageSearch = needsImages && onSearchAllImages && scenes.some(
+        (s) => !imageSearchStateByScene[s.id] || imageSearchStateByScene[s.id].status === 'idle'
+      );
+      if (needsVideoSearch || needsImageSearch) {
         setHasAutoSearched(true);
         startTransition(() => {
-          onSearchAll(pexelsApiKey);
+          if (needsVideoSearch) onSearchAll(pexelsApiKey);
+          if (needsImageSearch && onSearchAllImages) onSearchAllImages(pexelsApiKey);
         });
       }
     }
-  }, [hasAutoSearched, hasApiKey, scenes, searchStateByScene, onSearchAll, pexelsApiKey]);
+  }, [hasAutoSearched, hasApiKey, scenes, searchStateByScene, imageSearchStateByScene,
+      onSearchAll, onSearchAllImages, pexelsApiKey, needsVideos, needsImages]);
 
   const handleConfirmSelections = () => {
     if (isAllIncludedReady) {
@@ -98,18 +117,30 @@ export const ClipsReview: React.FC<ClipsReviewProps> = ({
       {/* Header Summary */}
       <div className="clips-review-header">
         <div className="clips-summary-info">
-          <h2 className="clips-review-title">Stock Video Review</h2>
+          <h2 className="clips-review-title">
+            {stockMediaType === 'videos' ? 'Stock Video Review' : 'Stock Media Review'}
+          </h2>
           <div className="clips-summary-badges">
             <span className="summary-badge">
               <Film size={15} />
               <span>{scenes.length} Total Scenes</span>
             </span>
-            <span className="summary-badge">
-              <CheckCircle2 size={15} className="text-success" />
-              <span>
-                {readyScenesCount} of {includedScenes.length} Ready (6 Clips Each)
+            {needsVideos && (
+              <span className="summary-badge">
+                <CheckCircle2 size={15} className="text-success" />
+                <span>
+                  {readyScenesCount} of {includedScenes.length} {stockMediaType === 'videos' ? 'Ready (6 Clips Each)' : 'Videos Ready'}
+                </span>
               </span>
-            </span>
+            )}
+            {needsImages && (
+              <span className="summary-badge" style={{ color: 'var(--color-primary)' }}>
+                <Image size={15} />
+                <span>
+                  {includedScenes.filter((s) => imageSearchStateByScene[s.id]?.status === 'ready').length} of {includedScenes.length} Images Ready
+                </span>
+              </span>
+            )}
             {excludedSceneIds.length > 0 && (
               <span className="summary-badge-subtle">
                 <EyeOff size={14} />
@@ -123,7 +154,7 @@ export const ClipsReview: React.FC<ClipsReviewProps> = ({
         </div>
 
         <div className="clips-header-actions">
-          {hasApiKey && (
+          {hasApiKey && needsVideos && (
             <button
               type="button"
               className="btn btn-secondary btn-sm"
@@ -131,7 +162,18 @@ export const ClipsReview: React.FC<ClipsReviewProps> = ({
               onClick={() => onSearchAll(pexelsApiKey)}
             >
               <RefreshCw size={14} />
-              <span>Search All Scenes</span>
+              <span>Search All Videos</span>
+            </button>
+          )}
+          {hasApiKey && needsImages && onSearchAllImages && (
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              title="Search Pexels images for all scenes"
+              onClick={() => onSearchAllImages(pexelsApiKey)}
+            >
+              <Image size={14} />
+              <span>Search All Images</span>
             </button>
           )}
 
@@ -148,9 +190,10 @@ export const ClipsReview: React.FC<ClipsReviewProps> = ({
       </div>
 
       <p className="clips-review-instructions">
-        Review the stock clips retrieved from Pexels. Six clips (Options A through F) are provided
-        for every included scene and all six will be exported. You can preview video playback,
-        customize search queries, or exclude scenes before export.
+        Review stock media from Pexels for each scene.
+        {needsVideos && ' Six video clips (A–F) are provided per scene.'}
+        {needsImages && ' Up to five still images are shown per scene.'}
+        {' '}You can re-search, preview, or exclude scenes before export.
       </p>
 
       {/* Confirmation Flash Alert */}
@@ -171,8 +214,7 @@ export const ClipsReview: React.FC<ClipsReviewProps> = ({
           <div className="alert-content">
             <div className="alert-title">Pexels API Key Required</div>
             <p className="alert-message">
-              You must configure a valid Pexels API key in Settings before stock video clips can be
-              retrieved.
+              You must configure a valid Pexels API key in Settings before stock media can be retrieved.
             </p>
             <button
               type="button"
@@ -189,15 +231,28 @@ export const ClipsReview: React.FC<ClipsReviewProps> = ({
       {/* Scene Cards List */}
       <div className="scene-clips-list">
         {scenes.map((scene) => (
-          <SceneClipsCard
-            key={scene.id}
-            scene={scene}
-            searchState={searchStateByScene[scene.id]}
-            isExcluded={excludedSceneIds.includes(scene.id)}
-            onReSearch={(customQuery) => onSearchScene(scene.id, pexelsApiKey, customQuery)}
-            onExcludeScene={() => onExcludeScene(scene.id)}
-            onRestoreScene={() => onRestoreScene(scene.id)}
-          />
+          <div key={scene.id} className="scene-media-block">
+            {/* Video clips section */}
+            {needsVideos && (
+              <SceneClipsCard
+                scene={scene}
+                searchState={searchStateByScene[scene.id]}
+                isExcluded={excludedSceneIds.includes(scene.id)}
+                onReSearch={(customQuery) => onSearchScene(scene.id, pexelsApiKey, customQuery)}
+                onExcludeScene={() => onExcludeScene(scene.id)}
+                onRestoreScene={() => onRestoreScene(scene.id)}
+              />
+            )}
+
+            {/* Image results section */}
+            {needsImages && !excludedSceneIds.includes(scene.id) && (
+              <ImageResultsCard
+                scene={scene}
+                imageState={imageSearchStateByScene[scene.id]}
+                onReSearch={(customQuery) => onSearchSceneImages?.(scene.id, pexelsApiKey, customQuery)}
+              />
+            )}
+          </div>
         ))}
       </div>
 
@@ -226,23 +281,25 @@ export const ClipsReview: React.FC<ClipsReviewProps> = ({
         </div>
 
         <div className="footer-right-actions">
-          <button
-            type="button"
-            className="btn btn-secondary"
-            title="Confirm current clip sets across all included scenes"
-            onClick={handleConfirmSelections}
-            disabled={!isAllIncludedReady}
-          >
-            <CheckCircle2 size={16} />
-            <span>Confirm Clip Sets</span>
-          </button>
+          {needsVideos && (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              title="Confirm current clip sets across all included scenes"
+              onClick={handleConfirmSelections}
+              disabled={!isAllIncludedReady}
+            >
+              <CheckCircle2 size={16} />
+              <span>Confirm Clip Sets</span>
+            </button>
+          )}
 
           <button
             type="button"
             className="btn btn-primary btn-generate-zip"
             title={
               !canProceedToPackaging()
-                ? 'Every included scene must have six valid video clips before proceeding to export'
+                ? 'Every included scene must have valid media before proceeding to export'
                 : 'Proceed to ZIP file download and packaging'
             }
             onClick={handleGenerateZip}
@@ -290,6 +347,152 @@ export const ClipsReview: React.FC<ClipsReviewProps> = ({
               </button>
             </div>
           </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// ImageResultsCard — shows fetched still images for a single scene
+// ---------------------------------------------------------------------------
+
+interface ImageResultsCardProps {
+  scene: Scene;
+  imageState: ImageSearchState | undefined;
+  onReSearch: (customQuery?: string) => void;
+}
+
+const ImageResultsCard: React.FC<ImageResultsCardProps> = ({ scene, imageState, onReSearch }) => {
+  const [editingQuery, setEditingQuery] = useState(false);
+  const [draftQuery, setDraftQuery] = useState('');
+
+  const status = imageState?.status ?? 'idle';
+  const candidates = imageState?.candidates ?? [];
+  const query = imageState?.query ?? scene.primaryQuery;
+
+  const handleStartEdit = () => {
+    setDraftQuery(query);
+    setEditingQuery(true);
+  };
+
+  const handleSubmitQuery = (e: React.FormEvent) => {
+    e.preventDefault();
+    setEditingQuery(false);
+    onReSearch(draftQuery.trim() || query);
+  };
+
+  return (
+    <div className="image-results-card">
+      {/* Card header */}
+      <div className="image-results-header">
+        <div className="image-results-title-row">
+          <Image size={15} style={{ color: 'var(--color-primary)', flexShrink: 0 }} />
+          <span className="image-results-label">
+            Scene {scene.sequence} — Stock Images
+          </span>
+          <span className={`image-status-badge status-${status}`}>
+            {status === 'searching' && <Loader2 size={12} className="bulk-spinner" />}
+            {status === 'ready' && <CheckCircle2 size={12} />}
+            {status === 'error' && <XCircle size={12} />}
+            <span>
+              {status === 'idle' && 'Not searched'}
+              {status === 'searching' && 'Searching…'}
+              {status === 'ready' && `${candidates.length} image${candidates.length !== 1 ? 's' : ''} found`}
+              {status === 'empty' && 'No results'}
+              {status === 'error' && 'Search failed'}
+            </span>
+          </span>
+        </div>
+
+        {/* Query row */}
+        <div className="image-query-row">
+          {editingQuery ? (
+            <form onSubmit={handleSubmitQuery} className="image-query-form">
+              <input
+                type="text"
+                className="form-input image-query-input"
+                value={draftQuery}
+                onChange={(e) => setDraftQuery(e.target.value)}
+                autoFocus
+                placeholder="Enter search query…"
+              />
+              <button type="submit" className="btn btn-primary btn-sm">
+                <Search size={13} />
+                <span>Search</span>
+              </button>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => setEditingQuery(false)}>
+                Cancel
+              </button>
+            </form>
+          ) : (
+            <div className="image-query-display">
+              <span className="image-query-text">"{query}"</span>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={handleStartEdit}
+                title="Edit search query"
+              >
+                Edit Query
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => onReSearch(query)}
+                title="Re-search with current query"
+              >
+                <RefreshCw size={13} />
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Image grid */}
+      {status === 'searching' && (
+        <div className="image-searching-placeholder">
+          <Loader2 size={22} className="bulk-spinner" style={{ color: 'var(--color-primary)' }} />
+          <span>Fetching images from Pexels…</span>
+        </div>
+      )}
+
+      {status === 'error' && imageState?.error && (
+        <p className="image-error-text">{imageState.error}</p>
+      )}
+
+      {(status === 'ready' || status === 'empty') && (
+        <div className="image-candidates-grid">
+          {candidates.length === 0 ? (
+            <p className="image-no-results">No images found. Try editing the search query above.</p>
+          ) : (
+            candidates.map((candidate, idx) => (
+              <div key={candidate.pexelsPhotoId} className="image-candidate-item">
+                <span className="image-candidate-label">
+                  {String.fromCharCode(65 + idx)}
+                </span>
+                <img
+                  src={candidate.previewImageUrl}
+                  alt={`Image ${String.fromCharCode(65 + idx)}`}
+                  className="image-candidate-thumb"
+                  loading="lazy"
+                />
+                <div className="image-candidate-meta">
+                  <span className="image-candidate-dims">
+                    {candidate.width} × {candidate.height}
+                  </span>
+                  <a
+                    href={candidate.sourceUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="image-pexels-link"
+                  >
+                    Pexels ↗
+                  </a>
+                </div>
+              </div>
+            ))
+          )}
         </div>
       )}
     </div>

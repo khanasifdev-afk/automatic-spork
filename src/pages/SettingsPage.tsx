@@ -288,6 +288,8 @@ export const SettingsPage: React.FC = () => {
       defaultVoiceProvider,
       defaultElevenLabs: voiceDefaults,
       defaultAi33Pro: ai33ProDefaults,
+      // Preserve the defaultStockMediaType that was loaded; it is managed per-job in JobOptions
+      defaultStockMediaType: persistedSettings.defaultStockMediaType,
     };
 
     const saved = saveSettings(toSave);

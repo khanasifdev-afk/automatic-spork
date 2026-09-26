@@ -10,13 +10,15 @@ import {
   VoiceSegmentState,
   CandidateLabel,
   VoiceProvider,
+  ImageSearchState,
+  BulkWorkflowStatus,
 } from '../types';
 import {
   loadSettings,
   DEFAULT_AI33PRO_SETTINGS,
 } from '../storage/settingsStorage';
 import { analyzeScriptWithGemini, GeminiAnalysisError } from '../services/gemini';
-import { searchClipsForScene, PexelsApiError } from '../services/pexels';
+import { searchClipsForScene, searchImagesForScene, PexelsApiError } from '../services/pexels';
 import {
   validateScriptInput,
   estimateDurationSeconds,
@@ -32,6 +34,7 @@ import {
 import {
   getMp4Filename,
   getMp3Filename,
+  getImageFilename,
   generateScriptSegmentsText,
 } from '../utils/filenames';
 import {
@@ -53,6 +56,8 @@ export type WorkflowState = {
   options: WorkflowOptions;
   scenes: Scene[];
   searchStateByScene: Record<string, SceneSearchState>;
+  /** Image search state per scene (only populated when stockMediaType includes images). */
+  imageSearchStateByScene: Record<string, ImageSearchState>;
   excludedSceneIds: string[];
   error: string | null;
 
@@ -66,6 +71,9 @@ export type WorkflowState = {
   // Feature 4 export state and controller
   exportState: ExportState | null;
   activeDownloadController: AbortController | null;
+
+  /** Bulk Gemini automated workflow status. */
+  bulkWorkflowStatus: BulkWorkflowStatus;
 
   // Actions
   initializeFromSettings: () => void;
@@ -101,6 +109,10 @@ export type WorkflowState = {
   // Feature 3 actions
   searchAllScenes: (pexelsApiKey: string) => Promise<void>;
   searchScene: (sceneId: string, pexelsApiKey: string, customQuery?: string) => Promise<void>;
+  /** Search Pexels Photos (images) for all scenes. */
+  searchAllImages: (pexelsApiKey: string) => Promise<void>;
+  /** Search Pexels Photos (images) for a single scene. */
+  searchSceneImages: (sceneId: string, pexelsApiKey: string, customQuery?: string) => Promise<void>;
   selectCandidate: (sceneId: string, candidateId: string) => void;
   excludeScene: (sceneId: string) => void;
   restoreScene: (sceneId: string) => void;
@@ -112,6 +124,10 @@ export type WorkflowState = {
   cancelExport: () => void;
   retryClipDownload: (sceneId: string, candidateLabel?: CandidateLabel) => Promise<void>;
   downloadZipFile: () => void;
+
+  // Bulk Gemini Nano automated workflow
+  runBulkWorkflow: (geminiKey: string, voiceKey: string, pexelsKey: string) => Promise<void>;
+  cancelBulkWorkflow: () => void;
 };
 
 /**
@@ -155,6 +171,7 @@ function getDefaultOptions(): WorkflowOptions {
     voiceProvider: saved.defaultVoiceProvider,
     elevenLabs: { ...saved.defaultElevenLabs },
     ai33Pro: { ...saved.defaultAi33Pro },
+    stockMediaType: saved.defaultStockMediaType ?? 'videos',
   };
 }
 
@@ -165,6 +182,7 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   options: getDefaultOptions(),
   scenes: [],
   searchStateByScene: {},
+  imageSearchStateByScene: {},
   excludedSceneIds: [],
   error: null,
   activeAbortController: null,
@@ -172,6 +190,7 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   isVoiceBatchRunning: false,
   exportState: null,
   activeDownloadController: null,
+  bulkWorkflowStatus: { stage: 'idle', progress: 0, message: '', error: null },
 
   initializeFromSettings: () => {
     const saved = loadSettings();
@@ -186,6 +205,7 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
             voiceProvider: saved.defaultVoiceProvider,
             elevenLabs: { ...saved.defaultElevenLabs },
             ai33Pro: { ...saved.defaultAi33Pro },
+            stockMediaType: saved.defaultStockMediaType ?? 'videos',
           },
         };
       }
@@ -312,6 +332,7 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
         activeAbortController: null,
         // Reset search and voice states when fresh scenes are generated
         searchStateByScene: {},
+        imageSearchStateByScene: {},
         voiceStateByScene: {},
         excludedSceneIds: [],
       });
@@ -611,6 +632,7 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
       options: getDefaultOptions(),
       scenes: [],
       searchStateByScene: {},
+      imageSearchStateByScene: {},
       voiceStateByScene: {},
       isVoiceBatchRunning: false,
       excludedSceneIds: [],
@@ -618,6 +640,7 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
       activeAbortController: null,
       activeDownloadController: null,
       exportState: null,
+      bulkWorkflowStatus: { stage: 'idle', progress: 0, message: '', error: null },
     });
   },
 
@@ -1246,7 +1269,7 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   },
 
   canProceedToPackaging: () => {
-    const { scenes, searchStateByScene, voiceStateByScene, options, excludedSceneIds } = get();
+    const { scenes, searchStateByScene, imageSearchStateByScene, voiceStateByScene, options, excludedSceneIds } = get();
     if (scenes.length === 0) return false;
     const includedScenes = scenes.filter((s) => !excludedSceneIds.includes(s.id));
     if (includedScenes.length === 0) return false;
@@ -1256,16 +1279,32 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
     const currentSettingsFp = createSettingsFingerprint(activeProvider, activeOptions);
     const hasAnyVoice = includedScenes.some((s) => Boolean(voiceStateByScene[s.id]));
 
+    const stockMediaType = options.stockMediaType ?? 'videos';
+    const needsVideos = stockMediaType === 'videos' || stockMediaType === 'both';
+    const needsImages = stockMediaType === 'images' || stockMediaType === 'both';
+
     return includedScenes.every((scene) => {
-      // Must have ready candidate set with exactly 6 candidates
-      const sState = searchStateByScene[scene.id];
-      const hasClips = Boolean(
-        sState &&
-        sState.status === 'ready' &&
-        Array.isArray(sState.candidates) &&
-        sState.candidates.length === 6
-      );
-      if (!hasClips) return false;
+      if (needsVideos) {
+        const sState = searchStateByScene[scene.id];
+        const hasClips = Boolean(
+          sState &&
+          sState.status === 'ready' &&
+          Array.isArray(sState.candidates) &&
+          sState.candidates.length === 6
+        );
+        if (!hasClips) return false;
+      }
+
+      if (needsImages) {
+        const imgState = imageSearchStateByScene[scene.id];
+        const hasImages = Boolean(
+          imgState &&
+          imgState.status === 'ready' &&
+          Array.isArray(imgState.candidates) &&
+          imgState.candidates.length > 0
+        );
+        if (!hasImages) return false;
+      }
 
       // If voice generation was used in this workflow, every included scene must have a matching ready voice
       if (hasAnyVoice) {
@@ -1330,49 +1369,57 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
     const currentSettingsFp = createSettingsFingerprint(activeProvider, activeOptions);
     const LABELS: CandidateLabel[] = ['A', 'B', 'C', 'D', 'E', 'F'];
 
-    // Validate MP4 variants and voice status for all included scenes and candidates
-    for (let i = 0; i < includedScenes.length; i++) {
-      const scene = includedScenes[i];
-      const searchState = searchStateByScene[scene.id];
+    const stockMediaType = options.stockMediaType ?? 'videos';
+    const needsVideos = stockMediaType === 'videos' || stockMediaType === 'both';
 
-      if (
-        !searchState ||
-        searchState.status !== 'ready' ||
-        !Array.isArray(searchState.candidates) ||
-        searchState.candidates.length !== 6
-      ) {
-        set({
-          exportState: {
-            stage: 'failed',
-            clips: [],
-            zipBlobUrl: null,
-            error: `Scene #${i + 1} does not have exactly six usable video candidates.`,
-          },
-        });
-        return;
-      }
+    // Validate MP4 variants and voice status for all included scenes and candidates if videos needed
+    if (needsVideos) {
+      for (let i = 0; i < includedScenes.length; i++) {
+        const scene = includedScenes[i];
+        const searchState = searchStateByScene[scene.id];
 
-      for (let j = 0; j < 6; j++) {
-        const candidate = searchState.candidates[j];
-        const label = LABELS[j];
-        try {
-          selectBestMp4Variant(candidate, options.orientation, options.quality);
-        } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : 'No usable MP4 variant.';
+        if (
+          !searchState ||
+          searchState.status !== 'ready' ||
+          !Array.isArray(searchState.candidates) ||
+          searchState.candidates.length !== 6
+        ) {
           set({
             exportState: {
               stage: 'failed',
               clips: [],
               zipBlobUrl: null,
-              error: `Scene #${i + 1} Candidate ${label}: ${msg}`,
+              error: `Scene #${i + 1} does not have exactly six usable video candidates.`,
             },
           });
           return;
         }
-      }
 
-      const hasAnyVoice = includedScenes.some((s) => Boolean(voiceStateByScene[s.id]));
-      if (hasAnyVoice) {
+        for (let j = 0; j < 6; j++) {
+          const candidate = searchState.candidates[j];
+          const label = LABELS[j];
+          try {
+            selectBestMp4Variant(candidate, options.orientation, options.quality);
+          } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : 'No usable MP4 variant.';
+            set({
+              exportState: {
+                stage: 'failed',
+                clips: [],
+                zipBlobUrl: null,
+                error: `Scene #${i + 1} Candidate ${label}: ${msg}`,
+              },
+            });
+            return;
+          }
+        }
+      }
+    }
+
+    const hasAnyVoice = includedScenes.some((s) => Boolean(voiceStateByScene[s.id]));
+    if (hasAnyVoice) {
+      for (let i = 0; i < includedScenes.length; i++) {
+        const scene = includedScenes[i];
         const voice = voiceStateByScene[scene.id];
         const expectedTextFp = createSourceTextFingerprint(scene.scriptText);
         if (
@@ -1396,28 +1443,30 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
     }
 
     const initialClips: ClipDownloadStatus[] = [];
-    includedScenes.forEach((scene, sceneIdx) => {
-      const seq = sceneIdx + 1;
-      LABELS.forEach((label) => {
-        const cacheKey = `${scene.id}-${label}`;
-        const hasBlob = clipBlobsCache.has(cacheKey);
-        const blob = clipBlobsCache.get(cacheKey);
-        initialClips.push({
-          sceneId: scene.id,
-          sequence: seq,
-          candidateLabel: label,
-          filename: getMp4Filename(seq, totalCount, label),
-          state: hasBlob ? ('complete' as const) : ('pending' as const),
-          receivedBytes: blob?.size,
-          totalBytes: blob?.size,
+    if (needsVideos) {
+      includedScenes.forEach((scene, sceneIdx) => {
+        const seq = sceneIdx + 1;
+        LABELS.forEach((label) => {
+          const cacheKey = `${scene.id}-${label}`;
+          const hasBlob = clipBlobsCache.has(cacheKey);
+          const blob = clipBlobsCache.get(cacheKey);
+          initialClips.push({
+            sceneId: scene.id,
+            sequence: seq,
+            candidateLabel: label,
+            filename: getMp4Filename(seq, totalCount, label),
+            state: hasBlob ? ('complete' as const) : ('pending' as const),
+            receivedBytes: blob?.size,
+            totalBytes: blob?.size,
+          });
         });
       });
-    });
+    }
 
     const downloadController = new AbortController();
     set({
       exportState: {
-        stage: 'downloading',
+        stage: needsVideos ? 'downloading' : 'preparing-files',
         clips: initialClips,
         zipBlobUrl: null,
         error: null,
@@ -1433,22 +1482,24 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
       url: string;
     }[] = [];
 
-    includedScenes.forEach((scene) => {
-      const searchState = searchStateByScene[scene.id];
-      LABELS.forEach((label, candidateIdx) => {
-        const cacheKey = `${scene.id}-${label}`;
-        if (!clipBlobsCache.has(cacheKey)) {
-          const candidate = searchState.candidates[candidateIdx];
-          const variant = selectBestMp4Variant(candidate, options.orientation, options.quality);
-          tasksToDownload.push({
-            taskId: cacheKey,
-            sceneId: scene.id,
-            candidateLabel: label,
-            url: variant.url,
-          });
-        }
+    if (needsVideos) {
+      includedScenes.forEach((scene) => {
+        const searchState = searchStateByScene[scene.id];
+        LABELS.forEach((label, candidateIdx) => {
+          const cacheKey = `${scene.id}-${label}`;
+          if (!clipBlobsCache.has(cacheKey)) {
+            const candidate = searchState.candidates[candidateIdx];
+            const variant = selectBestMp4Variant(candidate, options.orientation, options.quality);
+            tasksToDownload.push({
+              taskId: cacheKey,
+              sceneId: scene.id,
+              candidateLabel: label,
+              url: variant.url,
+            });
+          }
+        });
       });
-    });
+    }
 
     if (tasksToDownload.length === 0) {
       // All clips already in memory cache
@@ -1679,6 +1730,227 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
       triggerBrowserDownload(exportState.zipBlobUrl);
     }
   },
+
+  // ---------------------------------------------------------------------------
+  // Image search actions (Pexels Photos API)
+  // ---------------------------------------------------------------------------
+
+  searchAllImages: async (pexelsApiKey: string) => {
+    const { scenes, excludedSceneIds } = get();
+    const includedScenes = scenes.filter((s) => !excludedSceneIds.includes(s.id));
+    if (includedScenes.length === 0) return;
+
+    const previouslyUsed = new Set<number>();
+
+    for (const scene of includedScenes) {
+      const { imageSearchStateByScene } = get();
+      const previousState = imageSearchStateByScene[scene.id];
+      const queryToUse = previousState?.query || scene.primaryQuery;
+
+      // Collect already-used photo IDs from other ready image searches
+      const allStates = get().imageSearchStateByScene;
+      for (const [otherId, otherState] of Object.entries(allStates)) {
+        if (otherId !== scene.id && otherState.status === 'ready') {
+          for (const c of otherState.candidates) {
+            previouslyUsed.add(c.pexelsPhotoId);
+          }
+        }
+      }
+
+      await get().searchSceneImages(scene.id, pexelsApiKey, queryToUse);
+    }
+  },
+
+  searchSceneImages: async (sceneId: string, pexelsApiKey: string, customQuery?: string) => {
+    const { scenes, options, imageSearchStateByScene } = get();
+    const scene = scenes.find((s) => s.id === sceneId);
+    if (!scene) return;
+
+    if (!pexelsApiKey.trim()) {
+      set((state) => ({
+        imageSearchStateByScene: {
+          ...state.imageSearchStateByScene,
+          [sceneId]: {
+            status: 'error',
+            query: customQuery?.trim() || scene.primaryQuery,
+            candidates: [],
+            error: 'Pexels API key is missing. Please configure your key in Settings.',
+          },
+        },
+      }));
+      return;
+    }
+
+    const queryToUse = customQuery?.trim() || imageSearchStateByScene[sceneId]?.query || scene.primaryQuery;
+
+    // Collect photo IDs used by other ready scenes
+    const previouslyUsed = new Set<number>();
+    for (const [otherId, otherState] of Object.entries(imageSearchStateByScene)) {
+      if (otherId !== sceneId && otherState.status === 'ready') {
+        for (const c of otherState.candidates) {
+          previouslyUsed.add(c.pexelsPhotoId);
+        }
+      }
+    }
+
+    set((state) => ({
+      imageSearchStateByScene: {
+        ...state.imageSearchStateByScene,
+        [sceneId]: {
+          status: 'searching',
+          query: queryToUse,
+          candidates: state.imageSearchStateByScene[sceneId]?.candidates || [],
+          error: null,
+        },
+      },
+    }));
+
+    try {
+      const candidates = await searchImagesForScene(
+        scene,
+        options.orientation,
+        pexelsApiKey,
+        previouslyUsed,
+        queryToUse
+      );
+
+      if (candidates.length === 0) {
+        set((state) => ({
+          imageSearchStateByScene: {
+            ...state.imageSearchStateByScene,
+            [sceneId]: { status: 'empty', query: queryToUse, candidates: [], error: null },
+          },
+        }));
+      } else {
+        set((state) => ({
+          imageSearchStateByScene: {
+            ...state.imageSearchStateByScene,
+            [sceneId]: { status: 'ready', query: queryToUse, candidates, error: null },
+          },
+        }));
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Image search failed.';
+      set((state) => ({
+        imageSearchStateByScene: {
+          ...state.imageSearchStateByScene,
+          [sceneId]: { status: 'error', query: queryToUse, candidates: [], error: message },
+        },
+      }));
+    }
+  },
+
+  // ---------------------------------------------------------------------------
+  // Bulk Gemini Nano Automated Workflow
+  // Chains: Analyze → Voices → Stock Media Search → Package & Download ZIP
+  // ---------------------------------------------------------------------------
+
+  /** AbortController for the entire bulk run (shared across stages). */
+
+  runBulkWorkflow: async (geminiKey: string, voiceKey: string, pexelsKey: string) => {
+    const bulkController = new AbortController();
+
+    const setBulk = (partial: Partial<BulkWorkflowStatus>) => {
+      set((state) => ({
+        bulkWorkflowStatus: { ...state.bulkWorkflowStatus, ...partial },
+      }));
+    };
+
+    setBulk({ stage: 'analyzing', progress: 0, message: 'Analyzing script with Gemini…', error: null });
+
+    // ---- Stage 1: Analyze Script ----
+    try {
+      await get().analyzeScript(geminiKey);
+    } catch {
+      // analyzeScript stores error in state; we just surface it here
+    }
+
+    const afterAnalyze = get();
+    if (afterAnalyze.status === 'error' || afterAnalyze.scenes.length === 0) {
+      setBulk({ stage: 'failed', progress: 0, message: 'Script analysis failed.', error: afterAnalyze.error || 'Analysis failed.' });
+      return;
+    }
+    if (bulkController.signal.aborted) { setBulk({ stage: 'cancelled', message: 'Cancelled.' }); return; }
+
+    const scenes = afterAnalyze.scenes;
+    const totalScenes = scenes.length;
+    setBulk({ stage: 'analyzing', progress: 10, message: `Script analyzed — ${totalScenes} scenes created.` });
+
+    // ---- Stage 2: Generate Voices (if a voice key is provided) ----
+    if (voiceKey.trim()) {
+      setBulk({ stage: 'generating-voices', progress: 15, message: 'Generating voice narration…', error: null });
+      try {
+        await get().generateAllVoices(voiceKey);
+      } catch { /* failures are stored per-scene */ }
+
+      if (bulkController.signal.aborted) { setBulk({ stage: 'cancelled', message: 'Cancelled.' }); return; }
+      setBulk({ stage: 'generating-voices', progress: 40, message: 'Voice narration complete.' });
+    } else {
+      setBulk({ progress: 40, message: 'Skipping voice narration (no voice key).' });
+    }
+
+    // ---- Stage 3: Search Stock Media ----
+    const { options } = get();
+    const stockMediaType = options.stockMediaType ?? 'videos';
+    const needsVideos = stockMediaType === 'videos' || stockMediaType === 'both';
+    const needsImages = stockMediaType === 'images' || stockMediaType === 'both';
+
+    setBulk({ stage: 'searching-media', progress: 45, message: 'Searching for stock media…', error: null });
+
+    if (pexelsKey.trim()) {
+      if (needsVideos) {
+        try {
+          await get().searchAllScenes(pexelsKey);
+        } catch { /* per-scene errors */ }
+        if (bulkController.signal.aborted) { setBulk({ stage: 'cancelled', message: 'Cancelled.' }); return; }
+      }
+
+      if (needsImages) {
+        try {
+          await get().searchAllImages(pexelsKey);
+        } catch { /* per-scene errors */ }
+        if (bulkController.signal.aborted) { setBulk({ stage: 'cancelled', message: 'Cancelled.' }); return; }
+      }
+    }
+
+    setBulk({ stage: 'searching-media', progress: 75, message: 'Stock media search complete.' });
+
+    // ---- Stage 4: Package & Download ZIP ----
+    if (!get().canProceedToPackaging()) {
+      setBulk({
+        stage: 'failed',
+        progress: 75,
+        message: 'Some scenes are missing required media or voice. Review the clip and voice steps.',
+        error: 'Cannot package: not all scenes are complete.',
+      });
+      return;
+    }
+
+    setBulk({ stage: 'packaging', progress: 80, message: 'Packaging ZIP…', error: null });
+
+    try {
+      get().proceedToPackaging();
+      await get().startExport();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Packaging failed.';
+      setBulk({ stage: 'failed', progress: 80, message: msg, error: msg });
+      return;
+    }
+
+    if (bulkController.signal.aborted) { setBulk({ stage: 'cancelled', message: 'Cancelled.' }); return; }
+
+    // Trigger download
+    get().downloadZipFile();
+
+    setBulk({ stage: 'complete', progress: 100, message: 'Done! ZIP downloaded successfully.', error: null });
+  },
+
+  cancelBulkWorkflow: () => {
+    get().cancelAnalysis();
+    get().cancelVoiceGeneration();
+    get().cancelExport();
+    set({ bulkWorkflowStatus: { stage: 'cancelled', progress: 0, message: 'Workflow cancelled.', error: null } });
+  },
 }));
 
 /**
@@ -1688,10 +1960,15 @@ async function packageAndFinalizeZip(
   get: () => WorkflowState,
   set: (fn: (state: WorkflowState) => Partial<WorkflowState>) => void
 ): Promise<void> {
-  const { scenes, options, searchStateByScene, voiceStateByScene, excludedSceneIds } = get();
+  const { scenes, options, searchStateByScene, imageSearchStateByScene, voiceStateByScene, excludedSceneIds } = get();
   const includedScenes = scenes.filter((s) => !excludedSceneIds.includes(s.id));
   const totalCount = includedScenes.length;
   const LABELS: CandidateLabel[] = ['A', 'B', 'C', 'D', 'E', 'F'];
+  const IMAGE_LABELS: CandidateLabel[] = ['A', 'B', 'C', 'D', 'E'];
+
+  const stockMediaType = options.stockMediaType ?? 'videos';
+  const needsVideos = stockMediaType === 'videos' || stockMediaType === 'both';
+  const needsImages = stockMediaType === 'images' || stockMediaType === 'both';
 
   set((state) => ({
     exportState: state.exportState
@@ -1710,6 +1987,7 @@ async function packageAndFinalizeZip(
     const manifestEntries: ManifestEntry[] = [];
     const creditsEntries: CreditsEntry[] = [];
     const videoFiles: { filename: string; blob: Blob }[] = [];
+    const imageFiles: { filename: string; blob: Blob }[] = [];
     const voiceFiles: { filename: string; blob: Blob }[] = [];
 
     const hasAnyVoice = includedScenes.some((s) => Boolean(voiceStateByScene[s.id]));
@@ -1727,54 +2005,87 @@ async function packageAndFinalizeZip(
         voiceFiles.push({ filename: voiceFilename, blob: voiceState.audioBlob });
       }
 
-      const searchState = searchStateByScene[scene.id];
-      if (!searchState || !Array.isArray(searchState.candidates) || searchState.candidates.length !== 6) {
-        throw new Error(`Scene #${seq} does not have exactly six candidate clips.`);
+      if (needsVideos) {
+        const searchState = searchStateByScene[scene.id];
+        if (!searchState || !Array.isArray(searchState.candidates) || searchState.candidates.length !== 6) {
+          throw new Error(`Scene #${seq} does not have exactly six candidate clips.`);
+        }
+
+        for (let j = 0; j < 6; j++) {
+          const label = LABELS[j];
+          const filename = getMp4Filename(seq, totalCount, label);
+          const cacheKey = `${scene.id}-${label}`;
+
+          const videoBlob = clipBlobsCache.get(cacheKey);
+          if (!videoBlob) {
+            throw new Error(`Missing downloaded video blob for scene #${seq} Option ${label}.`);
+          }
+          videoFiles.push({ filename, blob: videoBlob });
+
+          const candidate = searchState.candidates[j];
+          const variant = selectBestMp4Variant(candidate, options.orientation, options.quality);
+
+          const activeVoiceProvider = options.voiceProvider || 'elevenlabs';
+          manifestEntries.push({
+            sequence: seq,
+            candidateLabel: label,
+            filename,
+            scriptText: scene.scriptText,
+            searchQuery: candidate.matchedQuery || searchState.query || scene.primaryQuery,
+            pexelsVideoId: candidate.pexelsVideoId,
+            sourceUrl: candidate.sourceUrl,
+            creator: candidate.creatorName,
+            creatorUrl: candidate.creatorUrl,
+            durationSeconds: candidate.durationSeconds,
+            width: variant.width,
+            height: variant.height,
+            voiceFilename: hasAnyVoice ? voiceFilename : undefined,
+            elevenLabsVoiceId: hasAnyVoice && activeVoiceProvider === 'elevenlabs' ? options.elevenLabs.voiceId : (hasAnyVoice && activeVoiceProvider === 'ai33pro' ? (options.ai33Pro?.voiceId || DEFAULT_AI33PRO_SETTINGS.voiceId) : undefined),
+            elevenLabsModelId: hasAnyVoice && activeVoiceProvider === 'elevenlabs' ? options.elevenLabs.modelId : undefined,
+            audioOutputFormat: hasAnyVoice && activeVoiceProvider === 'elevenlabs' ? options.elevenLabs.outputFormat : undefined,
+            audioDurationSeconds: hasAnyVoice && voiceState ? voiceState.durationSeconds : undefined,
+          });
+
+          creditsEntries.push({
+            sequence: seq,
+            candidateLabel: label,
+            filename,
+            creator: candidate.creatorName,
+            creatorUrl: candidate.creatorUrl,
+            sourceUrl: candidate.sourceUrl,
+          });
+        }
       }
 
-      for (let j = 0; j < 6; j++) {
-        const label = LABELS[j];
-        const filename = getMp4Filename(seq, totalCount, label);
-        const cacheKey = `${scene.id}-${label}`;
+      if (needsImages) {
+        const imgState = imageSearchStateByScene[scene.id];
+        if (imgState && imgState.status === 'ready' && Array.isArray(imgState.candidates)) {
+          for (let j = 0; j < imgState.candidates.length; j++) {
+            const candidate = imgState.candidates[j];
+            const label: CandidateLabel = candidate.candidateLabel || IMAGE_LABELS[j] || 'A';
+            const filename = getImageFilename(seq, totalCount, label);
 
-        const videoBlob = clipBlobsCache.get(cacheKey);
-        if (!videoBlob) {
-          throw new Error(`Missing downloaded video blob for scene #${seq} Option ${label}.`);
+            try {
+              const imageUrl = candidate.previewImageUrl || candidate.files[0]?.url;
+              if (imageUrl) {
+                const resp = await fetch(imageUrl);
+                const blob = await resp.blob();
+                imageFiles.push({ filename, blob });
+              }
+            } catch {
+              // skip failed image download
+            }
+
+            creditsEntries.push({
+              sequence: seq,
+              candidateLabel: label,
+              filename,
+              creator: candidate.creatorName,
+              creatorUrl: candidate.creatorUrl,
+              sourceUrl: candidate.sourceUrl,
+            });
+          }
         }
-        videoFiles.push({ filename, blob: videoBlob });
-
-        const candidate = searchState.candidates[j];
-        const variant = selectBestMp4Variant(candidate, options.orientation, options.quality);
-
-        const activeVoiceProvider = options.voiceProvider || 'elevenlabs';
-        manifestEntries.push({
-          sequence: seq,
-          candidateLabel: label,
-          filename,
-          scriptText: scene.scriptText,
-          searchQuery: candidate.matchedQuery || searchState.query || scene.primaryQuery,
-          pexelsVideoId: candidate.pexelsVideoId,
-          sourceUrl: candidate.sourceUrl,
-          creator: candidate.creatorName,
-          creatorUrl: candidate.creatorUrl,
-          durationSeconds: candidate.durationSeconds,
-          width: variant.width,
-          height: variant.height,
-          voiceFilename: hasAnyVoice ? voiceFilename : undefined,
-          elevenLabsVoiceId: hasAnyVoice && activeVoiceProvider === 'elevenlabs' ? options.elevenLabs.voiceId : (hasAnyVoice && activeVoiceProvider === 'ai33pro' ? (options.ai33Pro?.voiceId || DEFAULT_AI33PRO_SETTINGS.voiceId) : undefined),
-          elevenLabsModelId: hasAnyVoice && activeVoiceProvider === 'elevenlabs' ? options.elevenLabs.modelId : undefined,
-          audioOutputFormat: hasAnyVoice && activeVoiceProvider === 'elevenlabs' ? options.elevenLabs.outputFormat : undefined,
-          audioDurationSeconds: hasAnyVoice && voiceState ? voiceState.durationSeconds : undefined,
-        });
-
-        creditsEntries.push({
-          sequence: seq,
-          candidateLabel: label,
-          filename,
-          creator: candidate.creatorName,
-          creatorUrl: candidate.creatorUrl,
-          sourceUrl: candidate.sourceUrl,
-        });
       }
     }
 
@@ -1789,6 +2100,7 @@ async function packageAndFinalizeZip(
 
     const zipBlob = await buildZipPackage({
       videos: videoFiles,
+      images: imageFiles,
       voices: voiceFiles,
       scriptSegmentsText,
       manifestCsvText,

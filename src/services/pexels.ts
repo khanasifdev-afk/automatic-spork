@@ -7,12 +7,22 @@ import {
   ClipFileVariant,
   CandidateLabel,
   Scene,
+  ImageCandidate,
+  ImageCandidateLabel,
+  ImageFileVariant,
+  ImageSearchState,
 } from '../types';
 
 const PEXELS_TEST_TIMEOUT_MS = 6000;
 const PEXELS_SEARCH_TIMEOUT_MS = 10000;
 const PEXELS_SEARCH_BASE_URL = 'https://api.pexels.com/videos/search';
+const PEXELS_PHOTOS_SEARCH_BASE_URL = 'https://api.pexels.com/v1/search';
 const PEXELS_TEST_URL = 'https://api.pexels.com/videos/search?query=nature&per_page=1';
+
+/** Maximum image candidates per scene (project-plan cap). */
+export const MAX_IMAGE_CANDIDATES = 5;
+/** Maximum video candidates per scene. */
+export const MAX_VIDEO_CANDIDATES = 6;
 
 export interface RawPexelsVideoFile {
   id: number;
@@ -654,3 +664,285 @@ export async function searchClipsForScene(
     previouslySelectedVideoIds
   );
 }
+
+// =============================================================================
+// Pexels Photos (Images) API
+// =============================================================================
+
+export interface RawPexelsPhotoSrc {
+  original: string;
+  large2x: string;
+  large: string;
+  medium: string;
+  small: string;
+  portrait?: string;
+  landscape?: string;
+  tiny?: string;
+}
+
+export interface RawPexelsPhotoUser {
+  id: number;
+  name: string;
+  url: string;
+}
+
+export interface RawPexelsPhoto {
+  id: number;
+  width: number;
+  height: number;
+  url: string;
+  photographer: string;
+  photographer_url: string;
+  photographer_id: number;
+  avg_color?: string;
+  src: RawPexelsPhotoSrc;
+  liked?: boolean;
+  alt?: string;
+}
+
+export interface RawPexelsPhotoSearchResponse {
+  page: number;
+  per_page: number;
+  total_results: number;
+  next_page?: string;
+  photos: RawPexelsPhoto[];
+}
+
+/**
+ * In-memory cache for Pexels image search results during the current session.
+ */
+const imageSearchCache = new Map<string, RawPexelsPhotoSearchResponse>();
+
+/**
+ * Clears the in-memory Pexels image search cache.
+ */
+export function clearPexelsImageSearchCache(): void {
+  imageSearchCache.clear();
+}
+
+/**
+ * Makes a direct browser request to Pexels Photos Search API with in-memory caching.
+ */
+export async function searchPexelsPhotosDirect(
+  query: string,
+  orientation: OutputOrientation,
+  apiKey: string,
+  perPage: number = MAX_IMAGE_CANDIDATES,
+  signal?: AbortSignal
+): Promise<RawPexelsPhotoSearchResponse> {
+  const trimmedKey = apiKey.trim();
+  if (!trimmedKey) {
+    throw new PexelsApiError('Pexels API key is missing. Please configure your key in Settings.', {
+      isCredentialError: true,
+    });
+  }
+
+  const trimmedQuery = query.trim();
+  if (!trimmedQuery) {
+    return { page: 1, per_page: perPage, total_results: 0, photos: [] };
+  }
+
+  const cacheKey = `img::${trimmedQuery.toLowerCase()}::${orientation}::${perPage}`;
+  const cached = imageSearchCache.get(cacheKey);
+  if (cached) return cached;
+
+  const pexelsOrientation = orientation === 'landscape' ? 'landscape' : 'portrait';
+  const searchParams = new URLSearchParams({
+    query: trimmedQuery,
+    per_page: String(Math.max(1, perPage)),
+    orientation: pexelsOrientation,
+  });
+
+  const url = `${PEXELS_PHOTOS_SEARCH_BASE_URL}?${searchParams.toString()}`;
+
+  const internalController = new AbortController();
+  const timeoutId = setTimeout(() => internalController.abort(), PEXELS_SEARCH_TIMEOUT_MS);
+
+  let fetchSignal = internalController.signal;
+  if (signal) {
+    if ('any' in AbortSignal && typeof (AbortSignal as { any?: (signals: AbortSignal[]) => AbortSignal }).any === 'function') {
+      fetchSignal = (AbortSignal as { any: (signals: AbortSignal[]) => AbortSignal }).any([
+        signal,
+        internalController.signal,
+      ]);
+    } else {
+      signal.addEventListener('abort', () => internalController.abort(), { once: true });
+    }
+  }
+
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: { Authorization: trimmedKey, Accept: 'application/json' },
+      signal: fetchSignal,
+    });
+
+    clearTimeout(timeoutId);
+
+    if (response.ok) {
+      const data = (await response.json()) as RawPexelsPhotoSearchResponse;
+      imageSearchCache.set(cacheKey, data);
+      return data;
+    }
+
+    if (response.status === 401 || response.status === 403) {
+      throw new PexelsApiError('Invalid Pexels API key.', { status: response.status, isCredentialError: true });
+    }
+    if (response.status === 429) {
+      throw new PexelsApiError('Pexels monthly request limit or rate limit exceeded.', { status: 429, isQuotaError: true });
+    }
+    throw new PexelsApiError(`Pexels image search returned error status ${response.status}.`, { status: response.status });
+  } catch (err: unknown) {
+    clearTimeout(timeoutId);
+    if (err instanceof PexelsApiError) throw err;
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw new PexelsApiError('Pexels image search request timed out.', { status: 408 });
+    }
+    throw new PexelsApiError('Network or CORS failure connecting to Pexels image search.', { isNetworkError: true });
+  }
+}
+
+/**
+ * Normalizes a raw Pexels photo object into an ImageCandidate.
+ */
+export function normalizePexelsPhoto(
+  photo: RawPexelsPhoto,
+  matchedQuery: string
+): ImageCandidate | null {
+  if (!photo || typeof photo.id !== 'number' || photo.id <= 0) return null;
+  if (!photo.src?.original) return null;
+
+  const files: ImageFileVariant[] = [
+    { url: photo.src.original, width: photo.width, height: photo.height, label: 'original' },
+  ];
+  if (photo.src.large2x) files.push({ url: photo.src.large2x, width: 1880, height: Math.round(1880 * (photo.height / photo.width)), label: 'large2x' });
+  if (photo.src.large)  files.push({ url: photo.src.large,  width: 940,  height: Math.round(940  * (photo.height / photo.width)), label: 'large' });
+  if (photo.src.medium) files.push({ url: photo.src.medium, width: 350,  height: Math.round(350  * (photo.height / photo.width)), label: 'medium' });
+  if (photo.src.small)  files.push({ url: photo.src.small,  width: 130,  height: Math.round(130  * (photo.height / photo.width)), label: 'small' });
+
+  return {
+    id: `img-${photo.id}`,
+    pexelsPhotoId: photo.id,
+    sourceUrl: photo.url || `https://www.pexels.com/photo/${photo.id}/`,
+    creatorName: photo.photographer || 'Pexels Photographer',
+    creatorUrl: photo.photographer_url || 'https://www.pexels.com',
+    previewImageUrl: photo.src.large || photo.src.original,
+    width: photo.width,
+    height: photo.height,
+    files,
+    matchedQuery,
+    score: 0,
+    confidence: 'fair',
+  };
+}
+
+/**
+ * Scores and ranks image candidates, assigning labels A–E (max 5).
+ */
+function rankImageCandidates(
+  candidates: ImageCandidate[],
+  scene: Scene,
+  orientation: OutputOrientation,
+  previouslyUsedPhotoIds: Set<number>
+): ImageCandidate[] {
+  const IMAGE_LABELS: ImageCandidateLabel[] = ['A', 'B', 'C', 'D', 'E'];
+  const isPrimary = (q: string) => q.trim().toLowerCase() === scene.primaryQuery.trim().toLowerCase();
+
+  const scored = candidates.map((c) => {
+    let score = isPrimary(c.matchedQuery) ? 35 : 20;
+    const isCorrectOrientation = orientation === 'landscape' ? c.width >= c.height : c.height >= c.width;
+    if (isCorrectOrientation) score += 25;
+    // Resolution bonus: higher is better up to a cap
+    const maxDim = Math.max(c.width, c.height);
+    if (maxDim >= 3840) score += 20;
+    else if (maxDim >= 1920) score += 15;
+    else if (maxDim >= 1280) score += 10;
+    else score += 5;
+    // Duplicate penalty
+    if (previouslyUsedPhotoIds.has(c.pexelsPhotoId)) score -= 45;
+    const confidence: 'strong' | 'fair' | 'weak' = score >= 70 ? 'strong' : score >= 45 ? 'fair' : 'weak';
+    return { ...c, score, confidence };
+  });
+
+  scored.sort((a, b) => b.score - a.score);
+
+  return scored.slice(0, MAX_IMAGE_CANDIDATES).map((c, i) => ({
+    ...c,
+    candidateLabel: IMAGE_LABELS[i],
+  }));
+}
+
+/**
+ * Searches Pexels Photos for a scene, capped at MAX_IMAGE_CANDIDATES (5) per scene.
+ * Uses primary + fallback queries, deduplication, and ranking.
+ */
+export async function searchImagesForScene(
+  scene: Scene,
+  orientation: OutputOrientation,
+  apiKey: string,
+  previouslyUsedPhotoIds: Set<number>,
+  customQuery?: string,
+  signal?: AbortSignal
+): Promise<ImageCandidate[]> {
+  const primaryQuery = customQuery?.trim() || scene.primaryQuery.trim();
+  const allCandidates: ImageCandidate[] = [];
+  const seenPhotoIds = new Set<number>();
+
+  const matchesOrientation = (c: ImageCandidate) =>
+    orientation === 'landscape' ? c.width >= c.height : c.height >= c.width;
+
+  // 1. Primary query
+  if (primaryQuery) {
+    try {
+      const response = await searchPexelsPhotosDirect(
+        primaryQuery, orientation, apiKey, MAX_IMAGE_CANDIDATES, signal
+      );
+      for (const raw of response.photos || []) {
+        const candidate = normalizePexelsPhoto(raw, primaryQuery);
+        if (candidate && !seenPhotoIds.has(candidate.pexelsPhotoId)) {
+          seenPhotoIds.add(candidate.pexelsPhotoId);
+          allCandidates.push(candidate);
+        }
+      }
+    } catch (err) {
+      if (err instanceof PexelsApiError && (err.isCredentialError || err.isQuotaError)) throw err;
+    }
+  }
+
+  // 2. Fallback queries if fewer than 5 matching candidates
+  const matchingCount = allCandidates.filter(matchesOrientation).length;
+  if (!customQuery && matchingCount < MAX_IMAGE_CANDIDATES && Array.isArray(scene.fallbackQueries)) {
+    for (const fallback of scene.fallbackQueries) {
+      const current = allCandidates.filter(matchesOrientation).length;
+      if (current >= MAX_IMAGE_CANDIDATES) break;
+
+      const trimmedFallback = fallback.trim();
+      if (!trimmedFallback || trimmedFallback.toLowerCase() === primaryQuery.toLowerCase()) continue;
+
+      try {
+        const resp = await searchPexelsPhotosDirect(
+          trimmedFallback, orientation, apiKey, MAX_IMAGE_CANDIDATES, signal
+        );
+        for (const raw of resp.photos || []) {
+          const candidate = normalizePexelsPhoto(raw, trimmedFallback);
+          if (candidate && !seenPhotoIds.has(candidate.pexelsPhotoId)) {
+            seenPhotoIds.add(candidate.pexelsPhotoId);
+            allCandidates.push(candidate);
+          }
+        }
+      } catch {
+        // continue to next fallback
+      }
+    }
+  }
+
+  // 3. Orientation filter (soft — fallback to any if none match)
+  const orientationFiltered = allCandidates.filter(matchesOrientation);
+  const pool = orientationFiltered.length > 0 ? orientationFiltered : allCandidates;
+
+  // 4. Rank and cap at MAX_IMAGE_CANDIDATES
+  return rankImageCandidates(pool, scene, orientation, previouslyUsedPhotoIds);
+}
+
+// Export the ImageSearchState type re-export so consumers can use a unified import path
+export type { ImageSearchState };
