@@ -2,11 +2,31 @@ import { KeyTestStatus } from '../types';
 import { estimateDurationSeconds } from '../utils/textUtils';
 
 const GEMINI_TEST_TIMEOUT_MS = 6000;
-const GEMINI_MODEL = 'gemini-2.5-flash';
+export const GEMINI_MODELS = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-2.5-flash'];
+export const GEMINI_MODEL = GEMINI_MODELS[0];
+
+function isTransientOrModelUnavailableError(status: number, detailMessage?: string): boolean {
+  if (status === 404 || status === 503 || status === 500 || status === 502 || status === 504) return true;
+  if (detailMessage) {
+    const lower = detailMessage.toLowerCase();
+    if (
+      lower.includes('not found') ||
+      lower.includes('not available') ||
+      lower.includes('no longer available') ||
+      lower.includes('high demand') ||
+      lower.includes('temporarily') ||
+      lower.includes('does not exist') ||
+      lower.includes('models/')
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
 
 /**
- * Tests a Gemini API key by checking access to the gemini-2.5-flash model
- * via direct browser fetch to the Generative Language REST API.
+ * Tests a Gemini API key by checking access to available Gemini Flash models
+ * (gemini-2.5-flash, gemini-2.0-flash, gemini-1.5-flash) via direct browser fetch.
  * 
  * Never logs or exposes raw API keys in errors or network diagnostics.
  */
@@ -24,48 +44,142 @@ export async function testGeminiApiKey(apiKey: string): Promise<KeyTestStatus> {
   const timeoutId = setTimeout(() => controller.abort(), GEMINI_TEST_TIMEOUT_MS);
 
   try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}?key=${encodeURIComponent(trimmed)}`;
-    const response = await fetch(url, {
+    // First try universal models list endpoint which works for all key formats (AIzaSy... & AQ...)
+    const modelsUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(trimmed)}`;
+    const modelsResponse = await fetch(modelsUrl, {
       method: 'GET',
       headers: {
         'Accept': 'application/json',
+        'x-goog-api-key': trimmed,
       },
       signal: controller.signal,
     });
 
-    clearTimeout(timeoutId);
-
-    if (response.ok) {
+    if (modelsResponse.ok) {
+      clearTimeout(timeoutId);
       return {
         state: 'valid',
-        message: `Key is valid and ${GEMINI_MODEL} model access confirmed.`,
+        message: 'Key is valid and Gemini API model access confirmed.',
       };
     }
 
-    if (response.status === 400 || response.status === 401 || response.status === 403) {
+    if (modelsResponse.status === 401 || modelsResponse.status === 403) {
+      clearTimeout(timeoutId);
       return {
         state: 'invalid',
         message: 'Invalid API key or unauthorized.',
       };
     }
 
-    if (response.status === 429) {
+    if (modelsResponse.status === 429) {
+      clearTimeout(timeoutId);
       return {
         state: 'quota-exhausted',
         message: 'Gemini quota or rate limit exceeded.',
       };
     }
 
-    if (response.status >= 500) {
+    let lastErrorStatus = modelsResponse.status;
+    let lastErrorMessage = '';
+    try {
+      const errData = await modelsResponse.json();
+      if (errData?.error?.message) {
+        lastErrorMessage = errData.error.message;
+      }
+    } catch {
+      // ignore
+    }
+
+    // Fallback: iterate specific models if GET /v1beta/models returned 404 or non-standard status
+    for (let i = 0; i < GEMINI_MODELS.length; i++) {
+      const model = GEMINI_MODELS[i];
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}?key=${encodeURIComponent(trimmed)}`;
+      
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+          'x-goog-api-key': trimmed,
+        },
+        signal: controller.signal,
+      });
+
+      if (response.ok) {
+        clearTimeout(timeoutId);
+        return {
+          state: 'valid',
+          message: `Key is valid and ${model} model access confirmed.`,
+        };
+      }
+
+      if (response.status === 401 || response.status === 403) {
+        clearTimeout(timeoutId);
+        return {
+          state: 'invalid',
+          message: 'Invalid API key or unauthorized.',
+        };
+      }
+
+      if (response.status === 429) {
+        clearTimeout(timeoutId);
+        return {
+          state: 'quota-exhausted',
+          message: 'Gemini quota or rate limit exceeded.',
+        };
+      }
+
+      let detail = '';
+      try {
+        const errData = await response.json();
+        if (errData?.error?.message) {
+          detail = errData.error.message;
+        }
+      } catch {
+        // ignore
+      }
+
+      lastErrorStatus = response.status;
+      lastErrorMessage = detail;
+
+      if (isTransientOrModelUnavailableError(response.status, detail)) {
+        continue;
+      }
+
+      if (response.status === 400) {
+        clearTimeout(timeoutId);
+        return {
+          state: 'invalid',
+          message: 'Invalid API key or unauthorized.',
+        };
+      }
+
+      if (response.status >= 500) {
+        clearTimeout(timeoutId);
+        return {
+          state: 'unavailable',
+          message: `Gemini service is temporarily unavailable (${response.status}).`,
+        };
+      }
+    }
+
+    clearTimeout(timeoutId);
+    if (lastErrorStatus >= 500) {
       return {
         state: 'unavailable',
-        message: `Gemini service is temporarily unavailable (${response.status}).`,
+        message: `Gemini service is temporarily unavailable (${lastErrorStatus}).`,
+      };
+    }
+
+    if (lastErrorStatus === 404) {
+      return {
+        state: 'invalid',
+        message: 'Gemini API is not enabled for this API key/project (404). Please generate a key at aistudio.google.com.',
       };
     }
 
     return {
       state: 'unavailable',
-      message: `Gemini request returned status ${response.status}.`,
+      message: `No supported Gemini Flash model is available for this API key (${lastErrorStatus}${lastErrorMessage ? `: ${lastErrorMessage}` : ''}).`,
     };
   } catch (err: unknown) {
     clearTimeout(timeoutId);
@@ -343,73 +457,108 @@ export async function analyzeScriptWithGemini(
       },
     };
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(
-      trimmedKey
-    )}`;
+    let lastErrorStatus = 0;
+    let lastErrorMessage = '';
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      },
-      body: JSON.stringify(requestBody),
-      signal: controller.signal,
-    });
+    for (let i = 0; i < GEMINI_MODELS.length; i++) {
+      const model = GEMINI_MODELS[i];
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(
+        trimmedKey
+      )}`;
 
-    if (response.status === 429) {
-      clearTimeout(timeoutId);
-      throw new GeminiAnalysisError(
-        'Gemini quota or rate limit exceeded. Please wait a moment before trying again.',
-        429
-      );
-    }
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'x-goog-api-key': trimmedKey,
+        },
+        body: JSON.stringify(requestBody),
+        signal: controller.signal,
+      });
 
-    if (response.status === 400 || response.status === 401 || response.status === 403) {
-      clearTimeout(timeoutId);
-      throw new GeminiAnalysisError(
-        'Invalid or unauthorized Gemini API key. Please check your key in Settings.',
-        response.status
-      );
-    }
-
-    if (!response.ok) {
-      clearTimeout(timeoutId);
-      let detail = '';
-      try {
-        const errData = await response.json();
-        if (errData?.error?.message) {
-          detail = `: ${errData.error.message}`;
-        }
-      } catch {
-        // ignore
+      if (response.status === 429) {
+        clearTimeout(timeoutId);
+        throw new GeminiAnalysisError(
+          'Gemini quota or rate limit exceeded. Please wait a moment before trying again.',
+          429
+        );
       }
-      throw new GeminiAnalysisError(
-        `Gemini service returned an error (${response.status}${detail}). Please try again.`,
-        response.status
-      );
+
+      if (response.status === 401 || response.status === 403) {
+        clearTimeout(timeoutId);
+        throw new GeminiAnalysisError(
+          'Invalid or unauthorized Gemini API key. Please check your key in Settings.',
+          response.status
+        );
+      }
+
+      if (!response.ok) {
+        let detail = '';
+        try {
+          const errData = await response.json();
+          if (errData?.error?.message) {
+            detail = errData.error.message;
+          }
+        } catch {
+          // ignore
+        }
+
+        lastErrorStatus = response.status;
+        lastErrorMessage = detail;
+
+        if (isTransientOrModelUnavailableError(response.status, detail)) {
+          continue;
+        }
+
+        if (response.status === 400) {
+          clearTimeout(timeoutId);
+          throw new GeminiAnalysisError(
+            `Invalid Gemini API request or unauthorized key${detail ? `: ${detail}` : ''}.`,
+            response.status
+          );
+        }
+
+        clearTimeout(timeoutId);
+        throw new GeminiAnalysisError(
+          `Gemini service returned an error (${response.status}${detail ? `: ${detail}` : ''}). Please try again.`,
+          response.status
+        );
+      }
+
+      clearTimeout(timeoutId);
+
+      const data = await response.json();
+
+      // Extract text content from Gemini's candidate response
+      const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!rawText || typeof rawText !== 'string') {
+        throw new GeminiAnalysisError('Gemini returned an empty response. Please try again.');
+      }
+
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(rawText);
+      } catch {
+        throw new GeminiAnalysisError(
+          'Gemini returned an invalid response structure. Please try again.'
+        );
+      }
+
+      return validateGeminiSceneResponse(parsed, { sceneLength: options.sceneLength });
     }
 
     clearTimeout(timeoutId);
-
-    const data = await response.json();
-
-    // Extract text content from Gemini's candidate response
-    const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!rawText || typeof rawText !== 'string') {
-      throw new GeminiAnalysisError('Gemini returned an empty response. Please try again.');
-    }
-
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(rawText);
-    } catch {
+    if (lastErrorStatus >= 500) {
       throw new GeminiAnalysisError(
-        'Gemini returned an invalid response structure. Please try again.'
+        `Gemini service is experiencing high demand or is temporarily unavailable (${lastErrorStatus}${lastErrorMessage ? `: ${lastErrorMessage}` : ''}). Please try again in a few seconds.`,
+        lastErrorStatus
       );
     }
-
-    return validateGeminiSceneResponse(parsed, { sceneLength: options.sceneLength });
+    throw new GeminiAnalysisError(
+      `No supported Gemini Flash model is available for this API key (${lastErrorStatus}${lastErrorMessage ? `: ${lastErrorMessage}` : ''}). Please check your key or try again later.`,
+      lastErrorStatus
+    );
   } catch (err: unknown) {
     clearTimeout(timeoutId);
 

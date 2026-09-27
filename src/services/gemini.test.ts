@@ -35,7 +35,7 @@ describe('testGeminiApiKey', () => {
 
     const result = await testGeminiApiKey('valid-gemini-key');
     expect(result.state).toBe('valid');
-    expect(result.message).toContain('gemini-2.5-flash');
+    expect(result.message).toContain('model access confirmed');
     expect(result.usage).toBeUndefined(); // Google AI Studio link will be shown in UI
   });
 
@@ -78,6 +78,31 @@ describe('testGeminiApiKey', () => {
     const result = await testGeminiApiKey('network-fail-key');
     expect(result.state).toBe('unavailable');
     expect(result.message).toContain('Network or CORS error');
+  });
+
+  it('falls back to iterating specific models when GET /v1beta/models returns 404', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 404,
+        json: () => Promise.resolve({ error: { message: 'models endpoint not found' } }),
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 404,
+        json: () => Promise.resolve({ error: { message: 'models/gemini-2.0-flash not found' } }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+      });
+
+    globalThis.fetch = fetchMock;
+
+    const result = await testGeminiApiKey('fallback-key');
+    expect(result.state).toBe('valid');
+    expect(result.message).toContain('gemini-1.5-flash');
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
   it('returns unavailable state on server error (500)', async () => {
@@ -254,5 +279,49 @@ describe('analyzeScriptWithGemini', () => {
     await expect(
       analyzeScriptWithGemini('Hello world', sampleOptions, 'key123')
     ).rejects.toThrow('Gemini returned an invalid response structure');
+  });
+
+  it('falls back to gemini-2.0-flash when analyzeScriptWithGemini receives 404', async () => {
+    const geminiPayload = {
+      candidates: [
+        {
+          content: {
+            parts: [
+              {
+                text: JSON.stringify({
+                  scenes: [
+                    {
+                      sequence: 1,
+                      scriptText: 'Welcome to this guide.',
+                      visualDescription: 'Host smiling at camera in studio',
+                      primaryQuery: 'presenter studio smile',
+                    },
+                  ],
+                }),
+              },
+            ],
+          },
+        },
+      ],
+    };
+
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 404,
+        json: () => Promise.resolve({ error: { message: 'models/gemini-2.5-flash is no longer available' } }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve(geminiPayload),
+      });
+
+    globalThis.fetch = fetchMock;
+
+    const scenes = await analyzeScriptWithGemini('Welcome to this guide.', sampleOptions, 'key123');
+    expect(scenes).toHaveLength(1);
+    expect(scenes[0].scriptText).toBe('Welcome to this guide.');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
