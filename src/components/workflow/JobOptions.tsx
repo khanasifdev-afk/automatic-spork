@@ -9,7 +9,6 @@ import {
   ChevronDown,
   ChevronUp,
   Volume2,
-  Mic,
   Cpu,
   Info,
   Layers,
@@ -31,6 +30,7 @@ import {
   Ai33ProOptions,
   StockMediaType,
 } from '../../types';
+import { VoiceSearchSelect } from '../common/VoiceSearchSelect';
 
 interface JobOptionsProps {
   options: WorkflowOptions;
@@ -429,31 +429,21 @@ export const JobOptions: React.FC<JobOptionsProps> = ({
               {activeProvider === 'elevenlabs' && (
                 <>
                   <div className="job-options-grid voice-grid">
-                    {/* Voice Select */}
+                    {/* Voice Select with Search */}
                     <div className="job-option-group">
-                      <label htmlFor="job-voice-select" className="job-option-label">
-                        <Mic size={14} className="inline-icon" aria-hidden="true" /> Voice
-                      </label>
-                      <select
+                      <VoiceSearchSelect
                         id="job-voice-select"
-                        aria-label="Voice"
-                        className="form-select"
-                        value={options.elevenLabs.voiceId}
-                        onChange={(e) => handleElevenLabsChange({ voiceId: e.target.value })}
+                        label="Voice"
+                        voices={voices.map((v) => ({
+                          id: v.voice_id,
+                          name: v.name,
+                          category: v.category,
+                        }))}
+                        selectedVoiceId={options.elevenLabs.voiceId}
+                        onSelectVoice={(voiceId) => handleElevenLabsChange({ voiceId })}
                         disabled={disabled}
-                      >
-                        <option value="">— Select a Voice —</option>
-                        {voices.map((v) => (
-                          <option key={v.voice_id} value={v.voice_id}>
-                            {v.name} {v.category ? `(${v.category})` : ''}
-                          </option>
-                        ))}
-                        {options.elevenLabs.voiceId && !voices.some((v) => v.voice_id === options.elevenLabs.voiceId) && (
-                          <option value={options.elevenLabs.voiceId}>
-                            Saved voice ({options.elevenLabs.voiceId})
-                          </option>
-                        )}
-                      </select>
+                        placeholder="Search voice by name (e.g. Adam, Rachel)..."
+                      />
                     </div>
 
                     {/* TTS Model Select */}
@@ -646,35 +636,25 @@ export const JobOptions: React.FC<JobOptionsProps> = ({
 
                     {/* Voice Selection & Preview */}
                     <div className="job-option-group">
-                      <label htmlFor="job-ai33-voice-select" className="job-option-label">
-                        <Mic size={14} className="inline-icon" /> Voice Selection
-                      </label>
-                      <div className="voice-select-row">
-                        <select
+                      <div className="voice-select-row" style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
+                        <VoiceSearchSelect
                           id="job-ai33-voice-select"
-                          className="form-select voice-select-dropdown"
-                          value={options.ai33Pro?.voiceId || ''}
-                          onChange={(e) => handleAi33Change({ voiceId: e.target.value })}
-                          disabled={disabled || isLoadingAi33Voices}
-                        >
-                          <option value="">
-                            {isLoadingAi33Voices
-                              ? 'Loading available voices...'
-                              : ai33Voices.length === 0
-                              ? 'No voices loaded (test API key in Settings)'
-                              : '— Select an AI33 Pro Voice —'}
-                          </option>
-                          {ai33Voices.map((v) => (
-                            <option key={v.voice_id} value={v.voice_id}>
-                              {v.name} {v.language ? `(${v.language})` : ''} {v.gender ? `[${v.gender}]` : ''}
-                            </option>
-                          ))}
-                          {options.ai33Pro?.voiceId && !ai33Voices.some((v) => v.voice_id === options.ai33Pro?.voiceId) && (
-                            <option value={options.ai33Pro.voiceId}>
-                              Saved voice ({options.ai33Pro.voiceId})
-                            </option>
-                          )}
-                        </select>
+                          label="Voice Selection"
+                          className="flex-1"
+                          voices={ai33Voices.map((v) => {
+                            const details = [v.language, v.gender].filter(Boolean).join(', ');
+                            return {
+                              id: v.voice_id,
+                              name: v.name,
+                              category: details,
+                            };
+                          })}
+                          selectedVoiceId={options.ai33Pro?.voiceId || ''}
+                          onSelectVoice={(voiceId) => handleAi33Change({ voiceId })}
+                          isLoading={isLoadingAi33Voices}
+                          disabled={disabled}
+                          placeholder="Search voice by name (e.g. Adam, Rachel)..."
+                        />
 
                         {selectedAi33Voice?.preview_url && (
                           <button
@@ -682,6 +662,7 @@ export const JobOptions: React.FC<JobOptionsProps> = ({
                             className={`btn btn-preview-voice ${playingPreviewUrl === selectedAi33Voice.preview_url ? 'btn-primary' : 'btn-secondary'}`}
                             onClick={() => handleTogglePreview(selectedAi33Voice.preview_url!)}
                             title={playingPreviewUrl === selectedAi33Voice.preview_url ? 'Stop voice sample' : 'Play voice sample'}
+                            style={{ height: '36px', marginBottom: '1px' }}
                           >
                             {playingPreviewUrl === selectedAi33Voice.preview_url ? (
                               <>

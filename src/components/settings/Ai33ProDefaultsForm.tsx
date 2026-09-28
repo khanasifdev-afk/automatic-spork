@@ -1,6 +1,7 @@
 import React from 'react';
-import { Mic, Layers, Gauge, AlertTriangle, Play, Square } from 'lucide-react';
+import { Layers, Gauge, Play, Square } from 'lucide-react';
 import { Ai33ProOptions, Ai33Voice, Ai33SourceProvider } from '../../types';
+import { VoiceSearchSelect } from '../common/VoiceSearchSelect';
 
 interface Ai33ProDefaultsFormProps {
   options: Ai33ProOptions;
@@ -31,8 +32,6 @@ export const Ai33ProDefaultsForm: React.FC<Ai33ProDefaultsFormProps> = ({
   const audioRef = React.useRef<HTMLAudioElement | null>(null);
 
   const selectedVoice = voices.find((v) => v.voice_id === options.voiceId);
-  const isSelectedVoiceAvailable =
-    !options.voiceId || Boolean(selectedVoice);
 
   const handleTogglePreview = (previewUrl?: string) => {
     if (!previewUrl) return;
@@ -86,66 +85,47 @@ export const Ai33ProDefaultsForm: React.FC<Ai33ProDefaultsFormProps> = ({
           </span>
         </div>
 
-        {/* Voice Selector */}
+        {/* Voice Selector with Live Search */}
         <div className="form-group">
-          <div className="field-label-row">
-            <label htmlFor="ai33pro-default-voice" className="field-label">
-              <Mic size={15} className="inline-icon" />
-              <span>Default Voice</span>
-            </label>
-            {!isSelectedVoiceAvailable && (
-              <span className="badge badge-warning">
-                <AlertTriangle size={12} />
-                <span>Saved voice unavailable</span>
-              </span>
-            )}
-          </div>
-
-          <div className="voice-select-row" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-            <select
+          <div className="voice-select-row" style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
+            <VoiceSearchSelect
               id="ai33pro-default-voice"
-              className={`form-select ${!isSelectedVoiceAvailable ? 'border-warning' : ''}`}
-              value={options.voiceId}
-              onChange={(e) => onChange({ voiceId: e.target.value })}
-              disabled={disabled || isLoadingVoices}
-              aria-label="Select default AI33 Pro voice"
-            >
-              <option value="">
-                {isLoadingVoices
-                  ? 'Loading available voices...'
-                  : voices.length === 0
-                  ? 'No voices loaded (test API key first)'
-                  : '— Select a voice —'}
-              </option>
-
-              {!isSelectedVoiceAvailable && options.voiceId && (
-                <option value={options.voiceId} disabled>
-                  Unavailable voice ID ({options.voiceId})
-                </option>
-              )}
-
-              {voices.map((v) => {
+              label="Default Voice"
+              className="flex-1"
+              voices={voices.map((v) => {
                 const details = [v.language, v.gender].filter(Boolean).join(', ');
-                return (
-                  <option key={v.voice_id} value={v.voice_id}>
-                    {v.name} {details ? `(${details})` : ''}
-                  </option>
-                );
+                return {
+                  id: v.voice_id,
+                  name: v.name,
+                  category: details,
+                };
               })}
-            </select>
+              selectedVoiceId={options.voiceId}
+              onSelectVoice={(voiceId) => onChange({ voiceId })}
+              isLoading={isLoadingVoices}
+              disabled={disabled}
+              placeholder="Search voice by name (e.g. Adam, Rachel)..."
+              unavailableMessage="Saved voice unavailable"
+            />
 
             {selectedVoice?.preview_url && (
               <button
                 type="button"
                 className="btn btn-secondary btn-sm"
                 onClick={() => handleTogglePreview(selectedVoice.preview_url)}
-                title={playingPreviewUrl === selectedVoice.preview_url ? 'Stop sample' : 'Play voice sample'}
-                aria-label={playingPreviewUrl === selectedVoice.preview_url ? 'Stop sample' : 'Play voice sample'}
+                title={playingPreviewUrl === selectedVoice.preview_url ? 'Stop voice sample' : 'Play voice sample'}
+                style={{ height: '36px', minWidth: '80px', marginBottom: '1px' }}
               >
                 {playingPreviewUrl === selectedVoice.preview_url ? (
-                  <Square size={14} className="text-danger" />
+                  <>
+                    <Square size={13} />
+                    <span>Stop</span>
+                  </>
                 ) : (
-                  <Play size={14} />
+                  <>
+                    <Play size={13} />
+                    <span>Sample</span>
+                  </>
                 )}
               </button>
             )}

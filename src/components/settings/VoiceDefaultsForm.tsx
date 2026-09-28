@@ -1,6 +1,5 @@
 import React from 'react';
 import {
-  Mic,
   Cpu,
   FileAudio,
   Sliders,
@@ -12,6 +11,7 @@ import {
   ElevenLabsModel,
   ElevenLabsOutputFormat,
 } from '../../types';
+import { VoiceSearchSelect } from '../common/VoiceSearchSelect';
 
 interface VoiceDefaultsFormProps {
   options: ElevenLabsOptions;
@@ -39,8 +39,6 @@ export const VoiceDefaultsForm: React.FC<VoiceDefaultsFormProps> = ({
   isLoadingModels = false,
   disabled = false,
 }) => {
-  const isSelectedVoiceAvailable =
-    !options.voiceId || voices.some((v) => v.voice_id === options.voiceId);
   const isSelectedModelAvailable =
     !options.modelId || models.some((m) => m.model_id === options.modelId);
 
@@ -48,49 +46,23 @@ export const VoiceDefaultsForm: React.FC<VoiceDefaultsFormProps> = ({
     <div className="voice-defaults-form">
       {/* Voice & Model Grid */}
       <div className="form-row-grid">
-        {/* Voice Selector */}
+        {/* Voice Selector with Live Search */}
         <div className="form-group">
-          <div className="field-label-row">
-            <label htmlFor="elevenlabs-default-voice" className="field-label">
-              <Mic size={15} className="inline-icon" />
-              <span>Default Voice</span>
-            </label>
-            {!isSelectedVoiceAvailable && (
-              <span className="badge badge-warning">
-                <AlertTriangle size={12} />
-                <span>Saved voice unavailable</span>
-              </span>
-            )}
-          </div>
-
-          <select
+          <VoiceSearchSelect
             id="elevenlabs-default-voice"
-            className={`form-select ${!isSelectedVoiceAvailable ? 'border-warning' : ''}`}
-            value={options.voiceId}
-            onChange={(e) => onChange({ voiceId: e.target.value })}
-            disabled={disabled || isLoadingVoices}
-            aria-label="Select default ElevenLabs voice"
-          >
-            <option value="">
-              {isLoadingVoices
-                ? 'Loading available voices...'
-                : voices.length === 0
-                ? 'No voices loaded (test API key first)'
-                : '— Select a voice —'}
-            </option>
-
-            {!isSelectedVoiceAvailable && options.voiceId && (
-              <option value={options.voiceId} disabled>
-                Unavailable voice ID ({options.voiceId})
-              </option>
-            )}
-
-            {voices.map((v) => (
-              <option key={v.voice_id} value={v.voice_id}>
-                {v.name} {v.category ? `(${v.category})` : ''}
-              </option>
-            ))}
-          </select>
+            label="Default Voice"
+            voices={voices.map((v) => ({
+              id: v.voice_id,
+              name: v.name,
+              category: v.category,
+            }))}
+            selectedVoiceId={options.voiceId}
+            onSelectVoice={(voiceId) => onChange({ voiceId })}
+            isLoading={isLoadingVoices}
+            disabled={disabled}
+            placeholder="Search voice by name (e.g. Adam, Rachel)..."
+            unavailableMessage="Saved voice unavailable"
+          />
           <span className="field-hint">
             Voices are loaded directly from your ElevenLabs account after entering a valid API key.
           </span>
