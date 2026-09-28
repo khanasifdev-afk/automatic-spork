@@ -92,12 +92,16 @@ export const Ai33ProDefaultsForm: React.FC<Ai33ProDefaultsFormProps> = ({
               id="ai33pro-default-voice"
               label="Default Voice"
               className="flex-1"
+              providerName={`AI33 Pro (${options.sourceProvider.toUpperCase()})`}
               voices={voices.map((v) => {
                 const details = [v.language, v.gender].filter(Boolean).join(', ');
                 return {
                   id: v.voice_id,
                   name: v.name,
                   category: details,
+                  gender: v.gender,
+                  language: v.language,
+                  previewUrl: v.preview_url,
                 };
               })}
               selectedVoiceId={options.voiceId}

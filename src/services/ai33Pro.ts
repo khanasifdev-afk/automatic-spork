@@ -100,9 +100,12 @@ export async function testAi33ProApiKey(apiKey: string): Promise<KeyTestStatus> 
   }
 }
 
+const ai33VoiceCacheMap = new Map<string, { timestamp: number; voices: Ai33Voice[] }>();
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes cache
+
 /**
  * Loads available voices from AI33 Pro for a specified source provider.
- * Uses pagination to retrieve the full catalog without persisting to storage.
+ * Uses parallel page fetching and session caching for maximum speed.
  */
 export async function fetchAi33ProVoices(
   apiKey: string,
@@ -113,34 +116,82 @@ export async function fetchAi33ProVoices(
     return [];
   }
 
-  const allVoices: Ai33Voice[] = [];
-  let page = 1;
+  const cacheKey = `${trimmed}:${provider}`;
+  const cached = ai33VoiceCacheMap.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+    return cached.voices;
+  }
+
   const pageSize = 100;
-  const maxPages = 10; // Safety cap to avoid infinite pagination
+  const maxPagesCap = 50; // Fetch up to 5,000 voices per provider
 
-  while (page <= maxPages) {
-    const url = `${AI33_PRO_API_BASE}/v3/voices?provider=${encodeURIComponent(provider)}&page=${page}&page_size=${pageSize}`;
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'xi-api-key': trimmed,
-      },
-    });
+  // Fetch Page 1 first
+  const page1Url = `${AI33_PRO_API_BASE}/v3/voices?provider=${encodeURIComponent(provider)}&page=1&page_size=${pageSize}`;
+  const response = await fetch(page1Url, {
+    method: 'GET',
+    headers: {
+      'xi-api-key': trimmed,
+    },
+  });
 
-    if (!response.ok) {
-      if (response.status === 401 || response.status === 403) {
-        throw new Ai33ProApiError('Invalid AI33 Pro API key.', response.status);
-      }
-      throw new Ai33ProApiError(`Failed to fetch AI33 Pro voices (${response.status}).`, response.status);
+  if (!response.ok) {
+    if (response.status === 401 || response.status === 403) {
+      throw new Ai33ProApiError('Invalid AI33 Pro API key.', response.status);
+    }
+    throw new Ai33ProApiError(`Failed to fetch AI33 Pro voices (${response.status}).`, response.status);
+  }
+
+  const page1Data = await response.json();
+  const page1Items = Array.isArray(page1Data.data) ? page1Data.data : [];
+  const rawItems: unknown[] = [...page1Items];
+
+  const totalPages = typeof page1Data.pagination?.total_pages === 'number'
+    ? page1Data.pagination.total_pages
+    : page1Data.pagination?.has_more ? 2 : 1;
+
+  const targetPagesCount = Math.min(totalPages, maxPagesCap);
+
+  if (targetPagesCount > 1) {
+    const remainingPages: number[] = [];
+    for (let p = 2; p <= targetPagesCount; p++) {
+      remainingPages.push(p);
     }
 
-    const data = await response.json();
-    const items = Array.isArray(data.data) ? data.data : [];
+    // Fetch remaining pages in parallel
+    const pageResults = await Promise.all(
+      remainingPages.map(async (p) => {
+        try {
+          const pageUrl = `${AI33_PRO_API_BASE}/v3/voices?provider=${encodeURIComponent(provider)}&page=${p}&page_size=${pageSize}`;
+          const res = await fetch(pageUrl, {
+            method: 'GET',
+            headers: {
+              'xi-api-key': trimmed,
+            },
+          });
+          if (!res.ok) return [];
+          const data = await res.json();
+          return Array.isArray(data.data) ? data.data : [];
+        } catch {
+          return [];
+        }
+      })
+    );
 
-    for (const item of items) {
-      if (item && item.voice_id) {
+    for (const items of pageResults) {
+      rawItems.push(...items);
+    }
+  }
+
+  const allVoices: Ai33Voice[] = [];
+  const seenVoiceIds = new Set<string>();
+
+  for (const item of rawItems as Record<string, unknown>[]) {
+    if (item && item.voice_id) {
+      const vid = String(item.voice_id);
+      if (!seenVoiceIds.has(vid)) {
+        seenVoiceIds.add(vid);
         allVoices.push({
-          voice_id: String(item.voice_id),
+          voice_id: vid,
           name: String(item.name || item.voice_id),
           language: item.language ? String(item.language) : undefined,
           gender: item.gender ? String(item.gender) : undefined,
@@ -149,13 +200,12 @@ export async function fetchAi33ProVoices(
         });
       }
     }
-
-    if (!data.pagination?.has_more) {
-      break;
-    }
-
-    page++;
   }
+
+  ai33VoiceCacheMap.set(cacheKey, {
+    timestamp: Date.now(),
+    voices: allVoices,
+  });
 
   return allVoices;
 }

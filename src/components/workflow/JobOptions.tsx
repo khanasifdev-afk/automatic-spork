@@ -434,10 +434,12 @@ export const JobOptions: React.FC<JobOptionsProps> = ({
                       <VoiceSearchSelect
                         id="job-voice-select"
                         label="Voice"
+                        providerName="ElevenLabs"
                         voices={voices.map((v) => ({
                           id: v.voice_id,
                           name: v.name,
                           category: v.category,
+                          previewUrl: v.preview_url,
                         }))}
                         selectedVoiceId={options.elevenLabs.voiceId}
                         onSelectVoice={(voiceId) => handleElevenLabsChange({ voiceId })}
@@ -641,12 +643,16 @@ export const JobOptions: React.FC<JobOptionsProps> = ({
                           id="job-ai33-voice-select"
                           label="Voice Selection"
                           className="flex-1"
+                          providerName={`AI33 Pro (${(options.ai33Pro?.sourceProvider || 'elevenlabs').toUpperCase()})`}
                           voices={ai33Voices.map((v) => {
                             const details = [v.language, v.gender].filter(Boolean).join(', ');
                             return {
                               id: v.voice_id,
                               name: v.name,
                               category: details,
+                              gender: v.gender,
+                              language: v.language,
+                              previewUrl: v.preview_url,
                             };
                           })}
                           selectedVoiceId={options.ai33Pro?.voiceId || ''}

@@ -51,10 +51,12 @@ export const VoiceDefaultsForm: React.FC<VoiceDefaultsFormProps> = ({
           <VoiceSearchSelect
             id="elevenlabs-default-voice"
             label="Default Voice"
+            providerName="ElevenLabs"
             voices={voices.map((v) => ({
               id: v.voice_id,
               name: v.name,
               category: v.category,
+              previewUrl: v.preview_url,
             }))}
             selectedVoiceId={options.voiceId}
             onSelectVoice={(voiceId) => onChange({ voiceId })}

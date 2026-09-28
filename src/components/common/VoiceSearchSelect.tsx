@@ -1,11 +1,14 @@
 import React, { useState, useMemo } from 'react';
-import { Search, X, Mic, AlertTriangle } from 'lucide-react';
+import { Search, X, Mic, AlertTriangle, LayoutGrid } from 'lucide-react';
+import { VoiceLibraryModal } from './VoiceLibraryModal';
 
 export interface VoiceOption {
   id: string;
   name: string;
   category?: string;
   previewUrl?: string;
+  gender?: string;
+  language?: string;
 }
 
 interface VoiceSearchSelectProps {
@@ -19,6 +22,7 @@ interface VoiceSearchSelectProps {
   placeholder?: string;
   unavailableMessage?: string;
   className?: string;
+  providerName?: string;
 }
 
 export const VoiceSearchSelect: React.FC<VoiceSearchSelectProps> = ({
@@ -32,8 +36,10 @@ export const VoiceSearchSelect: React.FC<VoiceSearchSelectProps> = ({
   placeholder = 'Search voice by name (e.g. Adam, Rachel)...',
   unavailableMessage,
   className = '',
+  providerName,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
   // Filter voices live based on searchQuery (case-insensitive substring/prefix match)
   const filteredVoices = useMemo(() => {
@@ -42,7 +48,8 @@ export const VoiceSearchSelect: React.FC<VoiceSearchSelectProps> = ({
     return voices.filter(
       (v) =>
         v.name.toLowerCase().includes(trimmed) ||
-        (v.category && v.category.toLowerCase().includes(trimmed))
+        (v.category && v.category.toLowerCase().includes(trimmed)) ||
+        (v.language && v.language.toLowerCase().includes(trimmed))
     );
   }, [voices, searchQuery]);
 
@@ -54,17 +61,29 @@ export const VoiceSearchSelect: React.FC<VoiceSearchSelectProps> = ({
   return (
     <div className={`voice-search-select-container ${className}`}>
       {label && (
-        <div className="field-label-row mb-1">
+        <div className="field-label-row mb-1 flex items-center justify-between">
           <label htmlFor={id} className="field-label">
             <Mic size={14} className="inline-icon" />
             <span>{label}</span>
           </label>
-          {unavailableMessage && !isSelectedVoiceInList && (
-            <span className="badge badge-warning">
-              <AlertTriangle size={12} />
-              <span>{unavailableMessage}</span>
-            </span>
-          )}
+          <div className="flex items-center gap-2">
+            {unavailableMessage && !isSelectedVoiceInList && (
+              <span className="badge badge-warning">
+                <AlertTriangle size={12} />
+                <span>{unavailableMessage}</span>
+              </span>
+            )}
+            <button
+              type="button"
+              className="btn btn-sm btn-outline voice-library-browse-btn"
+              onClick={() => setIsModalOpen(true)}
+              disabled={disabled || isLoading}
+              title="Open full Voice Library popup"
+            >
+              <LayoutGrid size={13} className="inline-icon" />
+              <span>Browse All ({voices.length})</span>
+            </button>
+          </div>
         </div>
       )}
 
@@ -135,6 +154,18 @@ export const VoiceSearchSelect: React.FC<VoiceSearchSelectProps> = ({
           </option>
         ))}
       </select>
+
+      {/* Full Screen Voice Library Modal */}
+      <VoiceLibraryModal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        voices={voices}
+        selectedVoiceId={selectedVoiceId}
+        onSelectVoice={onSelectVoice}
+        title={label ? `${label} Library` : 'Voice Library'}
+        isLoading={isLoading}
+        providerName={providerName}
+      />
     </div>
   );
 };
