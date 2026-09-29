@@ -70,6 +70,12 @@ export const SceneClipsCard: React.FC<SceneClipsCardProps> = ({
         </div>
 
         <div className="scene-clips-header-meta">
+          <span className="scene-segment-badge font-mono text-xs">
+            Segment {String(scene.sequence).padStart(3, '0')}
+          </span>
+          <span className="scene-audio-ref-badge font-mono text-xs text-muted">
+            Audio: {String(scene.sequence).padStart(3, '0')}.mp3
+          </span>
           <span className="scene-timing-tag">~{scene.estimatedSeconds}s</span>
         </div>
 
@@ -268,18 +274,37 @@ export const SceneClipsCard: React.FC<SceneClipsCardProps> = ({
             </div>
           )}
 
-          {/* Search State: Ready with 6 Candidates */}
-          {status === 'ready' && candidates.length >= 6 && (
+          {/* Fallback Option Applied: Image replacement */}
+          {searchState?.isFallbackToImage && (
+            <div className="scene-fallback-image-notice alert alert-info mb-3">
+              <div className="flex items-center gap-2">
+                <Sparkles size={16} className="text-primary" />
+                <span className="font-semibold text-sm">
+                  Stock Video Unavailable — Replaced with Contextual High-Quality Images
+                </span>
+              </div>
+              <p className="text-xs text-muted mt-1">
+                No unique stock video clips were available for this 2.5s segment. Contextually relevant stock images have been retrieved below as the visual fallback.
+              </p>
+            </div>
+          )}
+
+          {/* Search State: Ready with Candidates (1 to 6) */}
+          {status === 'ready' && candidates.length > 0 && (
             <div className="scene-candidates-wrapper">
               <div className="scene-clips-grid-header mb-2 flex items-center justify-between flex-wrap gap-2">
                 <div className="flex items-center gap-2">
                   <h4 className="section-label font-medium text-sm">
-                    Ranked Video Options (6 Candidates A–F):
+                    {candidates.length === 6
+                      ? 'Ranked Video Options (6 Candidates A–F):'
+                      : candidates.length === 1
+                      ? 'Ranked Video Option (1 Candidate A):'
+                      : `Ranked Video Options (${candidates.length} Candidates A–${(['A', 'B', 'C', 'D', 'E', 'F'] as const)[candidates.length - 1]}):`}
                   </h4>
                   <span className="badge badge-subtle selection-count-badge">
                     {selectedClipIds
-                      ? `${candidates.slice(0, 6).filter((c) => selectedClipIds.includes(c.id)).length} of 6 selected`
-                      : '6 of 6 selected'}
+                      ? `${candidates.slice(0, 6).filter((c) => selectedClipIds.includes(c.id)).length} of ${candidates.length} selected`
+                      : `${candidates.length} of ${candidates.length} selected`}
                   </span>
                 </div>
                 {(onSelectAllClips || onDeselectAllClips) && (
@@ -289,7 +314,7 @@ export const SceneClipsCard: React.FC<SceneClipsCardProps> = ({
                         type="button"
                         className="btn btn-xs btn-outline"
                         onClick={onSelectAllClips}
-                        title="Select all 6 video clips for export"
+                        title={`Select all ${candidates.length} video clips for export`}
                       >
                         Select All
                       </button>

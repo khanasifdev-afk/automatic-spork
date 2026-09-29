@@ -45,9 +45,11 @@ describe('textUtils', () => {
       expect(estimateDurationSeconds(shortText, 'short')).toBeGreaterThanOrEqual(3);
     });
 
-    it('respects long target length constraints', () => {
-      const longText = 'A longer narration segment that goes into deeper explanation of the subject.';
-      expect(estimateDurationSeconds(longText, 'long')).toBeGreaterThanOrEqual(6);
+    it('respects 2.5s target length constraints', () => {
+      const phrase = 'Quick audio phrase for scene.';
+      const dur = estimateDurationSeconds(phrase, '2.5s');
+      expect(dur).toBeGreaterThanOrEqual(2);
+      expect(dur).toBeLessThanOrEqual(4);
     });
   });
 

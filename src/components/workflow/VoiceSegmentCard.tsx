@@ -65,8 +65,11 @@ export const VoiceSegmentCard: React.FC<VoiceSegmentCardProps> = ({
     >
       <div className="voice-card-header">
         <div className="voice-card-title-group">
-          <span className="sequence-badge">
-            Scene {scene.sequence} of {totalScenes}
+          <span className="sequence-badge" title="Segment sequence number">
+            Segment {String(scene.sequence).padStart(3, '0')} of {String(totalScenes).padStart(3, '0')}
+          </span>
+          <span className="voice-audio-ref-badge font-mono text-xs" title="Audio filename">
+            {String(scene.sequence).padStart(3, '0')}.mp3
           </span>
           <span className="voice-char-count" title="Narration character count">
             {charCount} {charCount === 1 ? 'char' : 'chars'}

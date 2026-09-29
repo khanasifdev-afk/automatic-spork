@@ -291,7 +291,8 @@ export function validateGeminiSceneResponse(
     }
 
     // Sanity check duration: if missing or unreasonably small/large, calculate via WPM
-    if (estimatedSeconds < 2 || estimatedSeconds > 60) {
+    const minAllowedSeconds = options?.sceneLength === '2.5s' ? 1 : 2;
+    if (estimatedSeconds < minAllowedSeconds || estimatedSeconds > 60) {
       estimatedSeconds = estimateDurationSeconds(scriptText, options?.sceneLength);
     }
 
@@ -325,11 +326,15 @@ function buildSegmentationPrompt(
   options: import('../types').WorkflowOptions
 ): string {
   const sceneLengthGuidance =
-    options.sceneLength === 'short'
+    options.sceneLength === '2.5s'
+      ? 'Divide the total duration of the narration into 2.5-second visual segments (e.g. a 15-second voiceover must be split into 6 distinct, sequential segments; roughly 5–7 spoken words per segment).'
+      : options.sceneLength === 'short'
       ? 'Target approximately 3 to 5 seconds per scene (roughly 8–13 spoken words).'
       : options.sceneLength === 'long'
       ? 'Target approximately 8 to 15 seconds per scene (roughly 20–38 spoken words).'
       : 'Target approximately 5 to 8 seconds per scene (roughly 13–20 spoken words).';
+
+  const is2Point5s = options.sceneLength === '2.5s';
 
   return `You are an expert video director, film editor, and stock footage curator.
 Analyze the following YouTube narration script and divide it into meaningful visual scenes suitable for stock video clip discovery.
@@ -340,19 +345,23 @@ Target video parameters:
 - Speaking pace: ~150 words per minute (~2.5 words per second).
 
 CRITICAL SEGMENTATION RULES:
-1. GROUP BY VISUAL IDEA, NOT BY SENTENCE:
-   - A scene should only change when the on-screen visual focus, action, subject, or setting MUST change.
+1. ${is2Point5s ? '2.5-SECOND VISUAL SEGMENTS' : 'GROUP BY VISUAL IDEA, NOT BY SENTENCE'}:
+   ${is2Point5s
+     ? `- Divide the total duration of the voiceover into 2.5-second visual segments (for example, a 15-second voiceover should be split into 6 distinct, sequential clips/images).
+   - At ~150 words per minute (~2.5 words per second), each 2.5-second visual segment corresponds to approximately 5 to 7 spoken words.
+   - For each 2.5-second audio phrase, search for and identify a relevant stock visual clip that precisely aligns with the specific context of that 2.5-second phrase.`
+     : `- A scene should only change when the on-screen visual focus, action, subject, or setting MUST change.
    - Do NOT split consecutive sentences that refer to, elaborate on, or share the same visual subject.
    - WHAT TO AVOID: Do NOT split "Since I started doing this, my tomatoes grew 3x bigger" and "This tomato weighs almost three times what a normal one does" into two separate scenes. Both describe the exact same visual subject (large prize-winning tomatoes), so they MUST be grouped together into a single scene.
-   - ONLY start a new scene when the narration transitions to a DISTINCT visual shift (e.g. cutting from showing the big harvested tomatoes to showing the gardening soil, fertilizer preparation, or hands planting seeds).
+   - ONLY start a new scene when the narration transitions to a DISTINCT visual shift (e.g. cutting from showing the big harvested tomatoes to showing the gardening soil, fertilizer preparation, or hands planting seeds).`}
 
 2. AVOID REDUNDANT & OVERLAPPING CLIPS:
    - Each consecutive scene MUST have a clearly different visual concept, action, or camera perspective from the previous scene to ensure diverse, engaging B-roll footage.
-   - Never create two consecutive scenes that would search for the same clip or show the same thing twice.
+   - Strictly do NOT repeat any stock clips or visuals throughout the video. Every segment must feature fresh, unique visual material.
 
 3. DURATION & WORD PACING:
    - Aim for the target scene duration: ${sceneLengthGuidance}.
-   - Do NOT create micro-scenes of only 4-7 words unless the scene duration profile is 'short' and the visual idea is genuinely standalone. Group related sentences together to hit the target duration range.
+   ${is2Point5s ? '- Strictly keep each segment pacing near 2.5 seconds (typically 5 to 7 spoken words).' : "- Do NOT create micro-scenes of only 4-7 words unless the scene duration profile is 'short' and the visual idea is genuinely standalone. Group related sentences together to hit the target duration range."}
 
 4. PRESERVE ORIGINAL NARRATION ORDER & TEXT:
    - The combined "scriptText" across all scenes must include 100% of the original script narration in its exact original order.

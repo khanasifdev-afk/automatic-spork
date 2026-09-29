@@ -5,7 +5,7 @@
 
 export type OutputOrientation = 'landscape' | 'portrait';
 export type VideoQuality = '720p' | '1080p' | '4k';
-export type TargetSceneLength = 'short' | 'standard' | 'long';
+export type TargetSceneLength = '2.5s' | 'short' | 'standard' | 'long';
 
 /**
  * Which type(s) of Pexels stock media to fetch per scene.
@@ -299,6 +299,7 @@ export type SceneSearchState = {
   query: string;
   candidates: ClipCandidate[];
   selectedCandidateId?: string | null;
+  isFallbackToImage?: boolean;
   error: string | null;
 };
 

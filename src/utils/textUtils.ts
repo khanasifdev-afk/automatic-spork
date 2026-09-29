@@ -46,6 +46,9 @@ export function estimateDurationSeconds(
   const rawSeconds = Math.round(words / 2.5);
 
   switch (sceneLength) {
+    case '2.5s':
+      // Target range: ~2 - 4 seconds (nominally 2.5s)
+      return Math.max(2, Math.min(rawSeconds, 4));
     case 'short':
       // Target range: ~3 - 5 seconds
       return Math.max(3, Math.min(rawSeconds, 8));

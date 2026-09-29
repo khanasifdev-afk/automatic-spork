@@ -289,9 +289,10 @@ export const JobOptions: React.FC<JobOptionsProps> = ({
                     onChange={(e) => onChange({ sceneLength: e.target.value as TargetSceneLength })}
                     disabled={disabled}
                   >
-                    <option value="4-7s">4-7 seconds (Dynamic YouTube pacing)</option>
-                    <option value="2-4s">2-4 seconds (Fast Shorts/TikTok pacing)</option>
-                    <option value="7-10s">7-10 seconds (Calm/Documentary pacing)</option>
+                    <option value="2.5s">2.5s (2.5-second visual segments)</option>
+                    <option value="short">3–5 seconds (Short dynamic cuts)</option>
+                    <option value="standard">5–8 seconds (Standard pacing)</option>
+                    <option value="long">8–15 seconds (Calm/Documentary pacing)</option>
                   </select>
                 </div>
 

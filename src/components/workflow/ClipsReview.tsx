@@ -89,9 +89,14 @@ export const ClipsReview: React.FC<ClipsReviewProps> = ({
   const needsImages = stockMediaType === 'images' || stockMediaType === 'both';
 
   const includedScenes = scenes.filter((s) => !excludedSceneIds.includes(s.id));
+
   const readyScenesCount = includedScenes.filter((s) => {
     const st = searchStateByScene[s.id];
-    return st && st.status === 'ready' && Array.isArray(st.candidates) && st.candidates.length === 6;
+    if (st?.isFallbackToImage) {
+      const imgSt = imageSearchStateByScene[s.id];
+      return imgSt && imgSt.status === 'ready' && Array.isArray(imgSt.candidates) && imgSt.candidates.length > 0;
+    }
+    return st && st.status === 'ready' && Array.isArray(st.candidates) && st.candidates.length >= 1;
   }).length;
 
   const isAllIncludedReady =
@@ -121,7 +126,7 @@ export const ClipsReview: React.FC<ClipsReviewProps> = ({
 
   const handleConfirmSelections = () => {
     if (isAllIncludedReady) {
-      setConfirmationNotice('Clip sets confirmed! All included scenes have six verified video options.');
+      setConfirmationNotice('Clip sets confirmed! All included scenes have verified video options.');
       setTimeout(() => setConfirmationNotice(null), 4000);
     }
   };
@@ -149,7 +154,15 @@ export const ClipsReview: React.FC<ClipsReviewProps> = ({
               <span className="summary-badge">
                 <CheckCircle2 size={15} className="text-success" />
                 <span>
-                  {readyScenesCount} of {includedScenes.length} {stockMediaType === 'videos' ? 'Ready (6 Clips Each)' : 'Videos Ready'}
+                  {readyScenesCount} of {includedScenes.length}{' '}
+                  {stockMediaType === 'videos'
+                    ? includedScenes.some((s) => {
+                        const st = searchStateByScene[s.id];
+                        return st?.status === 'ready' && Array.isArray(st.candidates) && st.candidates.length < 6 && !st.isFallbackToImage;
+                      })
+                      ? 'Videos Ready'
+                      : 'Ready (6 Clips Each)'
+                    : 'Videos Ready'}
                 </span>
               </span>
             )}
@@ -211,7 +224,7 @@ export const ClipsReview: React.FC<ClipsReviewProps> = ({
 
       <p className="clips-review-instructions">
         Review stock media from Pexels for each scene.
-        {needsVideos && ' Six video clips (A–F) are provided per scene.'}
+        {needsVideos && ' Up to six video clips (A–F) are provided per scene.'}
         {needsImages && ' Up to five still images are shown per scene.'}
         {' '}You can re-search, preview, or exclude scenes before export.
       </p>
@@ -269,7 +282,7 @@ export const ClipsReview: React.FC<ClipsReviewProps> = ({
             )}
 
             {/* Image results section */}
-            {needsImages && !excludedSceneIds.includes(scene.id) && (
+            {(needsImages || searchStateByScene[scene.id]?.isFallbackToImage) && !excludedSceneIds.includes(scene.id) && (
               <ImageResultsCard
                 scene={scene}
                 imageState={imageSearchStateByScene[scene.id]}

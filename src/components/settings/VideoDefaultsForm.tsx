@@ -102,9 +102,10 @@ export const VideoDefaultsForm: React.FC<VideoDefaultsFormProps> = ({
         </label>
         <p className="section-hint">Determines how Gemini splits sentences based on narration pace (140-160 WPM).</p>
 
-        <div className="options-grid options-grid-3">
+        <div className="options-grid options-grid-4">
           {(
             [
+              { id: '2.5s', label: '2.5s Cuts', range: '2.5 seconds', desc: 'Fast, dynamic 2.5s visual segments' },
               { id: 'short', label: 'Short', range: '3–5 seconds', desc: 'Fast, dynamic B-roll cuts' },
               { id: 'standard', label: 'Standard', range: '5–8 seconds', desc: 'Balanced documentary cadence' },
               { id: 'long', label: 'Long', range: '8–12 seconds', desc: 'Slow, expansive visual scenes' },

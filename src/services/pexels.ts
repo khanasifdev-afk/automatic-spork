@@ -655,9 +655,14 @@ export async function searchClipsForScene(
   // 3. Filter candidates by orientation when matching media is available
   const orientationFiltered = filterCandidatesByOrientation(allCandidates, orientation);
 
+  // Strictly enforce No Repetition: exclude any video clip already used in previous scenes
+  const strictlyUnique = orientationFiltered.filter(
+    (c) => !previouslySelectedVideoIds.has(c.pexelsVideoId)
+  );
+
   // 4. Rank candidates, cap at 6, and assign labels A-F
   return rankCandidates(
-    orientationFiltered,
+    strictlyUnique,
     scene,
     orientation,
     quality,
@@ -940,8 +945,13 @@ export async function searchImagesForScene(
   const orientationFiltered = allCandidates.filter(matchesOrientation);
   const pool = orientationFiltered.length > 0 ? orientationFiltered : allCandidates;
 
+  // Strictly enforce No Repetition: exclude any photo already used in previous scenes
+  const strictlyUnique = pool.filter(
+    (c) => !previouslyUsedPhotoIds.has(c.pexelsPhotoId)
+  );
+
   // 4. Rank and cap at MAX_IMAGE_CANDIDATES
-  return rankImageCandidates(pool, scene, orientation, previouslyUsedPhotoIds);
+  return rankImageCandidates(strictlyUnique, scene, orientation, previouslyUsedPhotoIds);
 }
 
 // Export the ImageSearchState type re-export so consumers can use a unified import path

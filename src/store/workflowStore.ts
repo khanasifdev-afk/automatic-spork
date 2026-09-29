@@ -1019,10 +1019,18 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
 
     const previouslySelected = new Set<number>();
     for (const [, state] of Object.entries(searchStateByScene)) {
-      if (state.status === 'ready' && state.selectedCandidateId) {
-        const sel = state.candidates.find((c) => c.id === state.selectedCandidateId);
-        if (sel) {
-          previouslySelected.add(sel.pexelsVideoId);
+      if (state.status === 'ready' && Array.isArray(state.candidates)) {
+        for (const c of state.candidates) {
+          previouslySelected.add(c.pexelsVideoId);
+        }
+      }
+    }
+
+    const previouslyUsedPhotos = new Set<number>();
+    for (const [, state] of Object.entries(get().imageSearchStateByScene)) {
+      if (state.status === 'ready' && Array.isArray(state.candidates)) {
+        for (const c of state.candidates) {
+          previouslyUsedPhotos.add(c.pexelsPhotoId);
         }
       }
     }
@@ -1046,7 +1054,7 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
 
     for (const scene of scenes) {
       const current = get().searchStateByScene[scene.id];
-      if (current && current.status === 'ready' && current.selectedCandidateId) {
+      if (current && current.status === 'ready' && (current.candidates.length >= 1 || current.isFallbackToImage)) {
         continue;
       }
 
@@ -1075,6 +1083,52 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
         );
 
         if (candidates.length === 0) {
+          // Fallback Option: If an appropriate stock video clip is unavailable, replace with high-quality contextually relevant images
+          try {
+            const fallbackImages = await searchImagesForScene(
+              scene,
+              options.orientation,
+              pexelsApiKey,
+              previouslyUsedPhotos,
+              queryToUse !== scene.primaryQuery ? queryToUse : undefined
+            );
+
+            if (fallbackImages.length > 0) {
+              for (const img of fallbackImages) {
+                previouslyUsedPhotos.add(img.pexelsPhotoId);
+              }
+              set((state) => ({
+                searchStateByScene: {
+                  ...state.searchStateByScene,
+                  [scene.id]: {
+                    status: 'ready',
+                    query: queryToUse,
+                    candidates: [],
+                    selectedCandidateId: null,
+                    isFallbackToImage: true,
+                    error: null,
+                  },
+                },
+                imageSearchStateByScene: {
+                  ...state.imageSearchStateByScene,
+                  [scene.id]: {
+                    status: 'ready',
+                    query: queryToUse,
+                    candidates: fallbackImages,
+                    error: null,
+                  },
+                },
+                selectedImageIdsByScene: {
+                  ...state.selectedImageIdsByScene,
+                  [scene.id]: fallbackImages.map((c) => c.pexelsPhotoId),
+                },
+              }));
+              continue;
+            }
+          } catch {
+            // Ignore fallback error and proceed to empty state below
+          }
+
           set((state) => ({
             searchStateByScene: {
               ...state.searchStateByScene,
@@ -1084,19 +1138,6 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
                 candidates: [],
                 selectedCandidateId: null,
                 error: null,
-              },
-            },
-          }));
-        } else if (candidates.length < 6) {
-          set((state) => ({
-            searchStateByScene: {
-              ...state.searchStateByScene,
-              [scene.id]: {
-                status: 'empty',
-                query: queryToUse,
-                candidates,
-                selectedCandidateId: candidates[0]?.id || null,
-                error: `Incomplete candidate set: Only ${candidates.length} clips found (6 required). Please edit your query or retry.`,
               },
             },
           }));
@@ -1112,8 +1153,13 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
                 query: queryToUse,
                 candidates,
                 selectedCandidateId: candidates[0]?.id || null,
+                isFallbackToImage: false,
                 error: null,
               },
+            },
+            selectedVideoClipIdsByScene: {
+              ...state.selectedVideoClipIdsByScene,
+              [scene.id]: candidates.slice(0, 6).map((c) => c.id),
             },
           }));
         }
@@ -1166,9 +1212,19 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
     // Collect previously discovered video IDs from ALL OTHER ready scenes
     const previouslySelected = new Set<number>();
     for (const [otherId, otherState] of Object.entries(searchStateByScene)) {
-      if (otherId !== sceneId && otherState.status === 'ready') {
+      if (otherId !== sceneId && otherState.status === 'ready' && Array.isArray(otherState.candidates)) {
         for (const c of otherState.candidates) {
           previouslySelected.add(c.pexelsVideoId);
+        }
+      }
+    }
+
+    // Collect previously used photo IDs from ALL OTHER ready image searches
+    const previouslyUsedPhotos = new Set<number>();
+    for (const [otherId, otherState] of Object.entries(get().imageSearchStateByScene)) {
+      if (otherId !== sceneId && otherState.status === 'ready' && Array.isArray(otherState.candidates)) {
+        for (const c of otherState.candidates) {
+          previouslyUsedPhotos.add(c.pexelsPhotoId);
         }
       }
     }
@@ -1197,6 +1253,48 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
       );
 
       if (candidates.length === 0) {
+        // Fallback Option: If an appropriate stock video clip is unavailable, replace with a high-quality contextually relevant image
+        try {
+          const fallbackImages = await searchImagesForScene(
+            scene,
+            options.orientation,
+            pexelsApiKey,
+            previouslyUsedPhotos,
+            queryToUse
+          );
+          if (fallbackImages.length > 0) {
+            set((state) => ({
+              searchStateByScene: {
+                ...state.searchStateByScene,
+                [sceneId]: {
+                  status: 'ready',
+                  query: queryToUse,
+                  candidates: [],
+                  selectedCandidateId: null,
+                  isFallbackToImage: true,
+                  error: null,
+                },
+              },
+              imageSearchStateByScene: {
+                ...state.imageSearchStateByScene,
+                [sceneId]: {
+                  status: 'ready',
+                  query: queryToUse,
+                  candidates: fallbackImages,
+                  error: null,
+                },
+              },
+              selectedImageIdsByScene: {
+                ...state.selectedImageIdsByScene,
+                [sceneId]: fallbackImages.map((c) => c.pexelsPhotoId),
+              },
+            }));
+            return;
+          }
+        } catch {
+          // ignore fallback error
+        }
+
         set((state) => ({
           searchStateByScene: {
             ...state.searchStateByScene,
@@ -1209,19 +1307,6 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
             },
           },
         }));
-      } else if (candidates.length < 6) {
-        set((state) => ({
-          searchStateByScene: {
-            ...state.searchStateByScene,
-            [sceneId]: {
-              status: 'empty',
-              query: queryToUse,
-              candidates,
-              selectedCandidateId: candidates[0]?.id || null,
-              error: `Incomplete candidate set: Only ${candidates.length} clips found (6 required). Please edit your query or retry.`,
-            },
-          },
-        }));
       } else {
         set((state) => ({
           searchStateByScene: {
@@ -1231,6 +1316,7 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
               query: queryToUse,
               candidates,
               selectedCandidateId: candidates[0]?.id || null,
+              isFallbackToImage: false,
               error: null,
             },
           },
@@ -1391,16 +1477,31 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
     return includedScenes.every((scene) => {
       if (needsVideos) {
         const sState = searchStateByScene[scene.id];
-        const hasClips = Boolean(
-          sState &&
-          sState.status === 'ready' &&
-          Array.isArray(sState.candidates) &&
-          sState.candidates.length === 6
-        );
-        if (!hasClips) return false;
+        if (sState?.isFallbackToImage) {
+          // Scene fell back to images: verify images exist and at least 1 is selected
+          const imgState = imageSearchStateByScene[scene.id];
+          const hasImages = Boolean(
+            imgState &&
+            imgState.status === 'ready' &&
+            Array.isArray(imgState.candidates) &&
+            imgState.candidates.length > 0
+          );
+          if (!hasImages) return false;
 
-        const selectedClips = selectedVideoClipIdsByScene[scene.id] ?? sState.candidates.map((c) => c.id);
-        if (selectedClips.length === 0 && !needsImages) return false;
+          const selectedImgs = selectedImageIdsByScene[scene.id] ?? imgState.candidates.map((c) => c.pexelsPhotoId);
+          if (selectedImgs.length === 0) return false;
+        } else {
+          const hasClips = Boolean(
+            sState &&
+            sState.status === 'ready' &&
+            Array.isArray(sState.candidates) &&
+            sState.candidates.length >= 1
+          );
+          if (!hasClips) return false;
+
+          const selectedClips = selectedVideoClipIdsByScene[scene.id] ?? sState.candidates.map((c) => c.id);
+          if (selectedClips.length === 0 && !needsImages) return false;
+        }
       }
 
       if (needsImages) {
@@ -1468,7 +1569,7 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
           clips: [],
           zipBlobUrl: null,
           error:
-            'Export is blocked until every included scene has exactly six usable Pexels candidates and a current voice segment.',
+            'Export is blocked until every included scene has usable media candidates (1 to 6 video clips or fallback images) and a current voice segment.',
         },
       });
       return;
@@ -1489,25 +1590,30 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
         const scene = includedScenes[i];
         const searchState = searchStateByScene[scene.id];
 
+        if (searchState?.isFallbackToImage) {
+          // Scene fell back to images: no video candidate validation required
+          continue;
+        }
+
         if (
           !searchState ||
           searchState.status !== 'ready' ||
           !Array.isArray(searchState.candidates) ||
-          searchState.candidates.length !== 6
+          searchState.candidates.length === 0
         ) {
           set({
             exportState: {
               stage: 'failed',
               clips: [],
               zipBlobUrl: null,
-              error: `Scene #${i + 1} does not have exactly six usable video candidates.`,
+              error: `Scene #${i + 1} does not have usable video candidates.`,
             },
           });
           return;
         }
 
         const selectedIds = (get().selectedVideoClipIdsByScene[scene.id]) ?? searchState.candidates.map((c) => c.id);
-        for (let j = 0; j < 6; j++) {
+        for (let j = 0; j < searchState.candidates.length; j++) {
           const candidate = searchState.candidates[j];
           if (!selectedIds.includes(candidate.id)) continue;
           const label = LABELS[j];
@@ -1561,6 +1667,7 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
       includedScenes.forEach((scene, sceneIdx) => {
         const seq = sceneIdx + 1;
         const searchState = searchStateByScene[scene.id];
+        if (searchState?.isFallbackToImage) return;
         const selectedIds = selectedVideoClipIdsByScene[scene.id] ?? searchState?.candidates?.map((c) => c.id) ?? [];
 
         searchState?.candidates?.forEach((candidate, candidateIdx) => {
@@ -1604,6 +1711,7 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
     if (needsVideos) {
       includedScenes.forEach((scene) => {
         const searchState = searchStateByScene[scene.id];
+        if (searchState?.isFallbackToImage) return;
         const selectedIds = selectedVideoClipIdsByScene[scene.id] ?? searchState?.candidates?.map((c) => c.id) ?? [];
 
         searchState?.candidates?.forEach((candidate, candidateIdx) => {
@@ -2140,15 +2248,17 @@ async function packageAndFinalizeZip(
         voiceFiles.push({ filename: voiceFilename, blob: voiceState.audioBlob });
       }
 
-      if (needsVideos) {
+      const isFallback = Boolean(searchStateByScene[scene.id]?.isFallbackToImage);
+
+      if (needsVideos && !isFallback) {
         const searchState = searchStateByScene[scene.id];
-        if (!searchState || !Array.isArray(searchState.candidates) || searchState.candidates.length !== 6) {
-          throw new Error(`Scene #${seq} does not have exactly six candidate clips.`);
+        if (!searchState || !Array.isArray(searchState.candidates) || searchState.candidates.length === 0) {
+          throw new Error(`Scene #${seq} does not have usable candidate clips.`);
         }
 
         const selectedIds = selectedVideoClipIdsByScene[scene.id] ?? searchState.candidates.map((c) => c.id);
 
-        for (let j = 0; j < 6; j++) {
+        for (let j = 0; j < searchState.candidates.length; j++) {
           const candidate = searchState.candidates[j];
           if (!selectedIds.includes(candidate.id)) {
             continue; // Skip unselected video clip
@@ -2198,7 +2308,7 @@ async function packageAndFinalizeZip(
         }
       }
 
-      if (needsImages) {
+      if (needsImages || isFallback) {
         const imgState = imageSearchStateByScene[scene.id];
         if (imgState && imgState.status === 'ready' && Array.isArray(imgState.candidates)) {
           const selectedImgIds = selectedImageIdsByScene[scene.id] ?? imgState.candidates.map((c) => c.pexelsPhotoId);
@@ -2222,6 +2332,27 @@ async function packageAndFinalizeZip(
             } catch {
               // skip failed image download
             }
+
+            const activeVoiceProvider = options.voiceProvider || 'elevenlabs';
+            manifestEntries.push({
+              sequence: seq,
+              candidateLabel: label,
+              filename,
+              scriptText: scene.scriptText,
+              searchQuery: candidate.matchedQuery || scene.primaryQuery,
+              pexelsVideoId: candidate.pexelsPhotoId,
+              sourceUrl: candidate.sourceUrl,
+              creator: candidate.creatorName,
+              creatorUrl: candidate.creatorUrl,
+              durationSeconds: 0,
+              width: candidate.width,
+              height: candidate.height,
+              voiceFilename: hasAnyVoice ? voiceFilename : undefined,
+              elevenLabsVoiceId: hasAnyVoice && activeVoiceProvider === 'elevenlabs' ? options.elevenLabs.voiceId : (hasAnyVoice && activeVoiceProvider === 'ai33pro' ? (options.ai33Pro?.voiceId || DEFAULT_AI33PRO_SETTINGS.voiceId) : undefined),
+              elevenLabsModelId: hasAnyVoice && activeVoiceProvider === 'elevenlabs' ? options.elevenLabs.modelId : undefined,
+              audioOutputFormat: hasAnyVoice && activeVoiceProvider === 'elevenlabs' ? options.elevenLabs.outputFormat : undefined,
+              audioDurationSeconds: hasAnyVoice && voiceState ? voiceState.durationSeconds : undefined,
+            });
 
             creditsEntries.push({
               sequence: seq,

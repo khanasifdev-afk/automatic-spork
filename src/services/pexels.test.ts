@@ -557,6 +557,30 @@ describe('searchClipsForScene orchestration', () => {
     expect(ids).toContain(5);
   });
 
+  it('strictly excludes clips that were already used in other scenes (no repetition rule)', async () => {
+    // Primary has clips 1, 2, 3, 4, 5, 6, but clips 1 and 2 were used in previous scenes
+    const primaryVideos = [1, 2, 3, 4, 5, 6].map((id) => createMockRawVideo(id));
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ page: 1, per_page: 6, total_results: 6, videos: primaryVideos }),
+    });
+
+    const previouslySelected = new Set([1, 2]);
+    const candidates = await searchClipsForScene(
+      testScene,
+      'landscape',
+      '1080p',
+      'valid-key',
+      previouslySelected
+    );
+
+    const ids = candidates.map((c) => c.pexelsVideoId);
+    expect(ids).not.toContain(1);
+    expect(ids).not.toContain(2);
+    expect(ids).toEqual([3, 4, 5, 6]);
+  });
+
   it('returns fewer than 6 candidates when all fallbacks are exhausted and total unique usable clips < 6', async () => {
     const primaryVideos = [1, 2].map((id) => createMockRawVideo(id));
     const fallback1Videos = [3].map((id) => createMockRawVideo(id));

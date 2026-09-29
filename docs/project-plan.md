@@ -36,9 +36,9 @@ Reduce the manual work required to create narration, find and review B-roll, and
 ### Success criteria
 
 - A user can paste a script and process it without manually splitting every scene.
-- Each included scene receives six ranked, exportable Pexels video options.
-- The user can preview all six without selecting one.
-- All six video options are downloaded using `scene-letter` filenames such as `001-A.mp4` through `001-F.mp4`.
+- Each included scene receives up to six ranked, exportable Pexels video options (1 to 6 clips based on available footage).
+- The user can preview all available options without selecting one, or selectively toggle clips.
+- All available video options are downloaded using `scene-letter` filenames such as `001-A.mp4` through `001-F.mp4`.
 - Each included script scene receives one playable voice-over segment from the selected service: ElevenLabs or AI33 Pro.
 - Failed or unsatisfactory voice segments can be regenerated individually.
 - The final clips are numbered in script order.
@@ -56,10 +56,10 @@ Reduce the manual work required to create narration, find and review B-roll, and
 - Gemini-based scene segmentation and Pexels query generation
 - Pexels video search
 - ElevenLabs or AI33 Pro text-to-speech generation for every included script scene
-- Automatic ranking and `A`–`F` ordering of six Pexels candidates
+- Automatic ranking and `A`–`F` ordering of up to six Pexels candidates
 - Manual scene, clip-set, and voice review
 - Browser-based clip downloading and ZIP generation
-- Six letter-suffixed MP4 files and one numbered audio file per scene, plus a plain-text script-segment file, manifest, and credits file in the ZIP
+- Up to six letter-suffixed MP4 files and one numbered audio file per scene, plus a plain-text script-segment file, manifest, and credits file in the ZIP
 - Simple progress and error feedback
 
 ### Not included

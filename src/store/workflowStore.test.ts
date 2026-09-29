@@ -663,6 +663,66 @@ describe('workflowStore', () => {
       useWorkflowStore.getState().deselectAllImages('scene-1');
       expect(useWorkflowStore.getState().selectedImageIdsByScene['scene-1']).toHaveLength(0);
     });
+
+    it('allows packaging when a scene fell back to images and has selected images', () => {
+      const s1: Scene = {
+        id: 'scene-1',
+        sequence: 1,
+        scriptText: 'Segment with fallback image.',
+        visualDescription: 'Visual fallback',
+        primaryQuery: 'rare concept',
+        fallbackQueries: [],
+        avoidTerms: [],
+        estimatedSeconds: 3,
+      };
+
+      useWorkflowStore.setState({
+        scenes: [s1],
+        voiceStateByScene: {
+          'scene-1': createMockReadyVoice('scene-1', s1.scriptText),
+        },
+        searchStateByScene: {
+          'scene-1': {
+            status: 'ready',
+            query: 'rare concept',
+            candidates: [],
+            selectedCandidateId: null,
+            isFallbackToImage: true,
+            error: null,
+          },
+        },
+        imageSearchStateByScene: {
+          'scene-1': {
+            status: 'ready',
+            query: 'rare concept',
+            candidates: [
+              {
+                id: 'img-1',
+                pexelsPhotoId: 999,
+                sourceUrl: 'https://pexels.com/photo/999',
+                creatorName: 'Photo Artist',
+                creatorUrl: '',
+                previewImageUrl: 'img999.jpg',
+                width: 1920,
+                height: 1080,
+                files: [],
+                matchedQuery: 'rare concept',
+                score: 85,
+                confidence: 'strong',
+              },
+            ],
+            error: null,
+          },
+        },
+        selectedImageIdsByScene: {
+          'scene-1': [999],
+        },
+      });
+
+      expect(useWorkflowStore.getState().canProceedToPackaging()).toBe(true);
+      expect(useWorkflowStore.getState().proceedToPackaging()).toBe(true);
+      expect(useWorkflowStore.getState().step).toBe('packaging');
+    });
   });
 
   describe('Feature 4: Export and Packaging Actions', () => {
@@ -738,14 +798,14 @@ describe('workflowStore', () => {
       expect(state.exportState?.error).toContain('Export is blocked');
     });
 
-    it('blocks export if any included scene has fewer than 6 candidates', async () => {
+    it('blocks export if any included scene has 0 candidates', async () => {
       useWorkflowStore.setState({
         scenes: [mockScene1],
         searchStateByScene: {
           'scene-1': {
-            status: 'ready',
+            status: 'empty',
             query: 'ocean waves',
-            candidates: createSixMockCandidates4(1).slice(0, 5),
+            candidates: [],
             selectedCandidateId: null,
             error: null,
           },
@@ -756,6 +816,27 @@ describe('workflowStore', () => {
       const state = useWorkflowStore.getState();
       expect(state.exportState?.stage).toBe('failed');
       expect(state.exportState?.error).toContain('Export is blocked');
+    });
+
+    it('allows export when scenes have between 1 and 6 candidates', async () => {
+      useWorkflowStore.setState({
+        scenes: [mockScene1],
+        searchStateByScene: {
+          'scene-1': {
+            status: 'ready',
+            query: 'ocean waves',
+            candidates: createSixMockCandidates4(1).slice(0, 1),
+            selectedCandidateId: null,
+            error: null,
+          },
+        },
+      });
+
+      await useWorkflowStore.getState().startExport();
+      const state = useWorkflowStore.getState();
+      expect(state.exportState?.stage).toBe('downloading');
+      expect(state.exportState?.clips).toHaveLength(1);
+      expect(state.exportState?.clips[0].candidateLabel).toBe('A');
     });
 
     it('successfully runs export, numbers included scenes with no gaps, and reaches complete stage', async () => {
