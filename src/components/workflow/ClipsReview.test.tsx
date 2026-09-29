@@ -126,7 +126,7 @@ describe('ClipsReview component', () => {
     expect(optionsF).toHaveLength(2);
   });
 
-  it('proves there is NO radio button, checkbox, or Select Clip action for choosing one clip', () => {
+  it('renders checkboxes on video clip options for selective downloading and no radio buttons', () => {
     render(
       <ClipsReview
         scenes={mockScenes}
@@ -146,24 +146,17 @@ describe('ClipsReview component', () => {
       />
     );
 
-    // 1. Ensure no radio buttons exist in the document
+    // 1. Ensure no radio buttons exist in the document (it is not a single-select radio list)
     const radioInputs = screen.queryAllByRole('radio');
     expect(radioInputs).toHaveLength(0);
 
-    // 2. Ensure no checkboxes exist in the document
+    // 2. Ensure checkboxes exist for all 12 candidate options across both scenes
     const checkboxInputs = screen.queryAllByRole('checkbox');
-    expect(checkboxInputs).toHaveLength(0);
+    expect(checkboxInputs).toHaveLength(12);
 
-    // 3. Ensure no "Select Clip" or "Select" buttons exist
+    // 3. Ensure no single exclusive "Select Clip" buttons exist
     const selectClipButtons = screen.queryAllByText(/Select Clip/i);
     expect(selectClipButtons).toHaveLength(0);
-
-    const selectButtons = screen.queryAllByRole('button', { name: /^Select$/i });
-    expect(selectButtons).toHaveLength(0);
-
-    // 4. Ensure no "Selected" indicator badges exist
-    const selectedBadges = screen.queryAllByText(/^Selected$/i);
-    expect(selectedBadges).toHaveLength(0);
   });
 
   it('allows query edit and search again', () => {

@@ -58,6 +58,10 @@ export type WorkflowState = {
   searchStateByScene: Record<string, SceneSearchState>;
   /** Image search state per scene (only populated when stockMediaType includes images). */
   imageSearchStateByScene: Record<string, ImageSearchState>;
+  /** User-selected video candidate IDs per scene (default: all 6 candidates). */
+  selectedVideoClipIdsByScene: Record<string, string[]>;
+  /** User-selected photo IDs per scene for images (default: all image candidates). */
+  selectedImageIdsByScene: Record<string, number[]>;
   excludedSceneIds: string[];
   error: string | null;
 
@@ -114,6 +118,12 @@ export type WorkflowState = {
   /** Search Pexels Photos (images) for a single scene. */
   searchSceneImages: (sceneId: string, pexelsApiKey: string, customQuery?: string) => Promise<void>;
   selectCandidate: (sceneId: string, candidateId: string) => void;
+  toggleVideoClipSelection: (sceneId: string, candidateId: string) => void;
+  toggleImageSelection: (sceneId: string, photoId: number) => void;
+  selectAllVideoClips: (sceneId: string) => void;
+  deselectAllVideoClips: (sceneId: string) => void;
+  selectAllImages: (sceneId: string) => void;
+  deselectAllImages: (sceneId: string) => void;
   excludeScene: (sceneId: string) => void;
   restoreScene: (sceneId: string) => void;
   canProceedToPackaging: () => boolean;
@@ -183,6 +193,8 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   scenes: [],
   searchStateByScene: {},
   imageSearchStateByScene: {},
+  selectedVideoClipIdsByScene: {},
+  selectedImageIdsByScene: {},
   excludedSceneIds: [],
   error: null,
   activeAbortController: null,
@@ -633,6 +645,8 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
       scenes: [],
       searchStateByScene: {},
       imageSearchStateByScene: {},
+      selectedVideoClipIdsByScene: {},
+      selectedImageIdsByScene: {},
       voiceStateByScene: {},
       isVoiceBatchRunning: false,
       excludedSceneIds: [],
@@ -1220,6 +1234,10 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
               error: null,
             },
           },
+          selectedVideoClipIdsByScene: {
+            ...state.selectedVideoClipIdsByScene,
+            [sceneId]: candidates.slice(0, 6).map((c) => c.id),
+          },
         }));
       }
     } catch (err: unknown) {
@@ -1256,6 +1274,84 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
     });
   },
 
+  toggleVideoClipSelection: (sceneId: string, candidateId: string) => {
+    set((state) => {
+      const allCandidates = state.searchStateByScene[sceneId]?.candidates || [];
+      const currentSelected = state.selectedVideoClipIdsByScene[sceneId] ?? allCandidates.map((c) => c.id);
+      const isAlreadySelected = currentSelected.includes(candidateId);
+      const nextSelected = isAlreadySelected
+        ? currentSelected.filter((id) => id !== candidateId)
+        : [...currentSelected, candidateId];
+
+      return {
+        selectedVideoClipIdsByScene: {
+          ...state.selectedVideoClipIdsByScene,
+          [sceneId]: nextSelected,
+        },
+      };
+    });
+  },
+
+  toggleImageSelection: (sceneId: string, photoId: number) => {
+    set((state) => {
+      const allCandidates = state.imageSearchStateByScene[sceneId]?.candidates || [];
+      const currentSelected = state.selectedImageIdsByScene[sceneId] ?? allCandidates.map((c) => c.pexelsPhotoId);
+      const isAlreadySelected = currentSelected.includes(photoId);
+      const nextSelected = isAlreadySelected
+        ? currentSelected.filter((id) => id !== photoId)
+        : [...currentSelected, photoId];
+
+      return {
+        selectedImageIdsByScene: {
+          ...state.selectedImageIdsByScene,
+          [sceneId]: nextSelected,
+        },
+      };
+    });
+  },
+
+  selectAllVideoClips: (sceneId: string) => {
+    set((state) => {
+      const allCandidates = state.searchStateByScene[sceneId]?.candidates || [];
+      return {
+        selectedVideoClipIdsByScene: {
+          ...state.selectedVideoClipIdsByScene,
+          [sceneId]: allCandidates.map((c) => c.id),
+        },
+      };
+    });
+  },
+
+  deselectAllVideoClips: (sceneId: string) => {
+    set((state) => ({
+      selectedVideoClipIdsByScene: {
+        ...state.selectedVideoClipIdsByScene,
+        [sceneId]: [],
+      },
+    }));
+  },
+
+  selectAllImages: (sceneId: string) => {
+    set((state) => {
+      const allCandidates = state.imageSearchStateByScene[sceneId]?.candidates || [];
+      return {
+        selectedImageIdsByScene: {
+          ...state.selectedImageIdsByScene,
+          [sceneId]: allCandidates.map((c) => c.pexelsPhotoId),
+        },
+      };
+    });
+  },
+
+  deselectAllImages: (sceneId: string) => {
+    set((state) => ({
+      selectedImageIdsByScene: {
+        ...state.selectedImageIdsByScene,
+        [sceneId]: [],
+      },
+    }));
+  },
+
   excludeScene: (sceneId: string) => {
     set((state) => ({
       excludedSceneIds: Array.from(new Set([...state.excludedSceneIds, sceneId])),
@@ -1269,7 +1365,16 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   },
 
   canProceedToPackaging: () => {
-    const { scenes, searchStateByScene, imageSearchStateByScene, voiceStateByScene, options, excludedSceneIds } = get();
+    const {
+      scenes,
+      searchStateByScene,
+      imageSearchStateByScene,
+      voiceStateByScene,
+      options,
+      excludedSceneIds,
+      selectedVideoClipIdsByScene,
+      selectedImageIdsByScene,
+    } = get();
     if (scenes.length === 0) return false;
     const includedScenes = scenes.filter((s) => !excludedSceneIds.includes(s.id));
     if (includedScenes.length === 0) return false;
@@ -1293,6 +1398,9 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
           sState.candidates.length === 6
         );
         if (!hasClips) return false;
+
+        const selectedClips = selectedVideoClipIdsByScene[scene.id] ?? sState.candidates.map((c) => c.id);
+        if (selectedClips.length === 0 && !needsImages) return false;
       }
 
       if (needsImages) {
@@ -1304,6 +1412,9 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
           imgState.candidates.length > 0
         );
         if (!hasImages) return false;
+
+        const selectedImgs = selectedImageIdsByScene[scene.id] ?? imgState.candidates.map((c) => c.pexelsPhotoId);
+        if (selectedImgs.length === 0 && !needsVideos) return false;
       }
 
       // If voice generation was used in this workflow, every included scene must have a matching ready voice
@@ -1395,8 +1506,10 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
           return;
         }
 
+        const selectedIds = (get().selectedVideoClipIdsByScene[scene.id]) ?? searchState.candidates.map((c) => c.id);
         for (let j = 0; j < 6; j++) {
           const candidate = searchState.candidates[j];
+          if (!selectedIds.includes(candidate.id)) continue;
           const label = LABELS[j];
           try {
             selectBestMp4Variant(candidate, options.orientation, options.quality);
@@ -1442,11 +1555,17 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
       }
     }
 
+    const selectedVideoClipIdsByScene = get().selectedVideoClipIdsByScene || {};
     const initialClips: ClipDownloadStatus[] = [];
     if (needsVideos) {
       includedScenes.forEach((scene, sceneIdx) => {
         const seq = sceneIdx + 1;
-        LABELS.forEach((label) => {
+        const searchState = searchStateByScene[scene.id];
+        const selectedIds = selectedVideoClipIdsByScene[scene.id] ?? searchState?.candidates?.map((c) => c.id) ?? [];
+
+        searchState?.candidates?.forEach((candidate, candidateIdx) => {
+          if (!selectedIds.includes(candidate.id)) return;
+          const label = LABELS[candidateIdx] || candidate.candidateLabel || 'A';
           const cacheKey = `${scene.id}-${label}`;
           const hasBlob = clipBlobsCache.has(cacheKey);
           const blob = clipBlobsCache.get(cacheKey);
@@ -1485,10 +1604,13 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
     if (needsVideos) {
       includedScenes.forEach((scene) => {
         const searchState = searchStateByScene[scene.id];
-        LABELS.forEach((label, candidateIdx) => {
+        const selectedIds = selectedVideoClipIdsByScene[scene.id] ?? searchState?.candidates?.map((c) => c.id) ?? [];
+
+        searchState?.candidates?.forEach((candidate, candidateIdx) => {
+          if (!selectedIds.includes(candidate.id)) return;
+          const label = LABELS[candidateIdx] || candidate.candidateLabel || 'A';
           const cacheKey = `${scene.id}-${label}`;
           if (!clipBlobsCache.has(cacheKey)) {
-            const candidate = searchState.candidates[candidateIdx];
             const variant = selectBestMp4Variant(candidate, options.orientation, options.quality);
             tasksToDownload.push({
               taskId: cacheKey,
@@ -1827,6 +1949,10 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
             ...state.imageSearchStateByScene,
             [sceneId]: { status: 'ready', query: queryToUse, candidates, error: null },
           },
+          selectedImageIdsByScene: {
+            ...state.selectedImageIdsByScene,
+            [sceneId]: candidates.map((c) => c.pexelsPhotoId),
+          },
         }));
       }
     } catch (err: unknown) {
@@ -1960,7 +2086,16 @@ async function packageAndFinalizeZip(
   get: () => WorkflowState,
   set: (fn: (state: WorkflowState) => Partial<WorkflowState>) => void
 ): Promise<void> {
-  const { scenes, options, searchStateByScene, imageSearchStateByScene, voiceStateByScene, excludedSceneIds } = get();
+  const {
+    scenes,
+    options,
+    searchStateByScene,
+    imageSearchStateByScene,
+    voiceStateByScene,
+    excludedSceneIds,
+    selectedVideoClipIdsByScene,
+    selectedImageIdsByScene,
+  } = get();
   const includedScenes = scenes.filter((s) => !excludedSceneIds.includes(s.id));
   const totalCount = includedScenes.length;
   const LABELS: CandidateLabel[] = ['A', 'B', 'C', 'D', 'E', 'F'];
@@ -2011,7 +2146,14 @@ async function packageAndFinalizeZip(
           throw new Error(`Scene #${seq} does not have exactly six candidate clips.`);
         }
 
+        const selectedIds = selectedVideoClipIdsByScene[scene.id] ?? searchState.candidates.map((c) => c.id);
+
         for (let j = 0; j < 6; j++) {
+          const candidate = searchState.candidates[j];
+          if (!selectedIds.includes(candidate.id)) {
+            continue; // Skip unselected video clip
+          }
+
           const label = LABELS[j];
           const filename = getMp4Filename(seq, totalCount, label);
           const cacheKey = `${scene.id}-${label}`;
@@ -2022,7 +2164,6 @@ async function packageAndFinalizeZip(
           }
           videoFiles.push({ filename, blob: videoBlob });
 
-          const candidate = searchState.candidates[j];
           const variant = selectBestMp4Variant(candidate, options.orientation, options.quality);
 
           const activeVoiceProvider = options.voiceProvider || 'elevenlabs';
@@ -2060,8 +2201,14 @@ async function packageAndFinalizeZip(
       if (needsImages) {
         const imgState = imageSearchStateByScene[scene.id];
         if (imgState && imgState.status === 'ready' && Array.isArray(imgState.candidates)) {
+          const selectedImgIds = selectedImageIdsByScene[scene.id] ?? imgState.candidates.map((c) => c.pexelsPhotoId);
+
           for (let j = 0; j < imgState.candidates.length; j++) {
             const candidate = imgState.candidates[j];
+            if (!selectedImgIds.includes(candidate.pexelsPhotoId)) {
+              continue; // Skip unselected image
+            }
+
             const label: CandidateLabel = candidate.candidateLabel || IMAGE_LABELS[j] || 'A';
             const filename = getImageFilename(seq, totalCount, label);
 

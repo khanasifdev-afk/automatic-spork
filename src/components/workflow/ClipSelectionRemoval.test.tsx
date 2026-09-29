@@ -67,11 +67,22 @@ describe('Clip Selection Removal & 6-Candidate Review Interaction Tests', () => 
     // Assert candidate badge A is rendered
     expect(screen.getByText('Option A')).toBeInTheDocument();
 
-    // Assert absence of selection controls
+    // Assert absence of selection controls when onSelect is omitted
     expect(screen.queryByRole('radio')).toBeNull();
     expect(screen.queryByRole('checkbox')).toBeNull();
-    expect(screen.queryByText(/select clip/i)).toBeNull();
-    expect(screen.queryByText(/^selected$/i)).toBeNull();
+  });
+
+  it('ClipCard renders a checkbox and handles toggling when onSelect is provided', () => {
+    const candidate = candidatesSix[0];
+    const onSelect = vi.fn();
+    render(<ClipCard candidate={candidate} candidateLabel="A" rank={1} isSelected={true} onSelect={onSelect} />);
+
+    const checkbox = screen.getByRole('checkbox', { name: /Select Option A/i });
+    expect(checkbox).toBeInTheDocument();
+    expect(checkbox).toHaveAttribute('aria-checked', 'true');
+
+    fireEvent.click(checkbox);
+    expect(onSelect).toHaveBeenCalledTimes(1);
   });
 
   it('ClipCard renders a download button at the bottom left of each video card', () => {
@@ -85,7 +96,7 @@ describe('Clip Selection Removal & 6-Candidate Review Interaction Tests', () => 
     fireEvent.click(downloadButtons[0]);
   });
 
-  it('SceneClipsCard displays all 6 video previews labelled A through F with zero selection controls', () => {
+  it('SceneClipsCard displays all 6 video previews labelled A through F with selection controls when enabled', () => {
     const searchState: SceneSearchState = {
       status: 'ready',
       query: 'mountain peaks aerial',
@@ -93,11 +104,19 @@ describe('Clip Selection Removal & 6-Candidate Review Interaction Tests', () => 
       error: null,
     };
 
+    const onToggleSelectClip = vi.fn();
+    const onSelectAllClips = vi.fn();
+    const onDeselectAllClips = vi.fn();
+
     render(
       <SceneClipsCard
         scene={scene}
         searchState={searchState}
         isExcluded={false}
+        selectedClipIds={['clip-0', 'clip-1', 'clip-2']}
+        onToggleSelectClip={onToggleSelectClip}
+        onSelectAllClips={onSelectAllClips}
+        onDeselectAllClips={onDeselectAllClips}
         onReSearch={vi.fn()}
         onExcludeScene={vi.fn()}
         onRestoreScene={vi.fn()}
@@ -109,18 +128,26 @@ describe('Clip Selection Removal & 6-Candidate Review Interaction Tests', () => 
       expect(screen.getByText(label)).toBeInTheDocument();
     });
 
-    // Verify all 6 creator names are rendered
-    ['Creator A', 'Creator B', 'Creator C', 'Creator D', 'Creator E', 'Creator F'].forEach((creator) => {
-      expect(screen.getByText(creator)).toBeInTheDocument();
-    });
+    // Check count badge
+    expect(screen.getByText('3 of 6 selected')).toBeInTheDocument();
 
-    // Verify no radio inputs or checkboxes
-    expect(screen.queryAllByRole('radio')).toHaveLength(0);
-    expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
+    // Verify 6 checkboxes rendered
+    const checkboxes = screen.getAllByRole('checkbox');
+    expect(checkboxes).toHaveLength(6);
 
-    // Verify no "Select Clip" buttons
-    expect(screen.queryAllByText(/select clip/i)).toHaveLength(0);
-    expect(screen.queryAllByRole('button', { name: /^select$/i })).toHaveLength(0);
+    // Click first checkbox
+    fireEvent.click(checkboxes[0]);
+    expect(onToggleSelectClip).toHaveBeenCalledWith('clip-0');
+
+    // Click Select All
+    const selectAllBtn = screen.getByRole('button', { name: /^select all$/i });
+    fireEvent.click(selectAllBtn);
+    expect(onSelectAllClips).toHaveBeenCalledTimes(1);
+
+    // Click Deselect All
+    const deselectAllBtn = screen.getByRole('button', { name: /^deselect all$/i });
+    fireEvent.click(deselectAllBtn);
+    expect(onDeselectAllClips).toHaveBeenCalledTimes(1);
   });
 
   it('SceneClipsCard renders incomplete warning when fewer than 6 candidates exist', () => {

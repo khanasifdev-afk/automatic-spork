@@ -2,6 +2,7 @@ import React, { useEffect, useState, useTransition } from 'react';
 import {
   Film,
   Image,
+  Check,
   CheckCircle2,
   EyeOff,
   ArrowLeft,
@@ -25,12 +26,20 @@ interface ClipsReviewProps {
   options: WorkflowOptions;
   searchStateByScene: Record<string, SceneSearchState>;
   imageSearchStateByScene?: Record<string, ImageSearchState>;
+  selectedVideoClipIdsByScene?: Record<string, string[]>;
+  selectedImageIdsByScene?: Record<string, number[]>;
   excludedSceneIds: string[];
   pexelsApiKey: string;
   onSearchAll: (apiKey: string) => Promise<void>;
   onSearchScene: (sceneId: string, apiKey: string, customQuery?: string) => Promise<void>;
   onSearchAllImages?: (apiKey: string) => Promise<void>;
   onSearchSceneImages?: (sceneId: string, apiKey: string, customQuery?: string) => Promise<void>;
+  onToggleSelectClip?: (sceneId: string, candidateId: string) => void;
+  onToggleSelectImage?: (sceneId: string, photoId: number) => void;
+  onSelectAllClips?: (sceneId: string) => void;
+  onDeselectAllClips?: (sceneId: string) => void;
+  onSelectAllImages?: (sceneId: string) => void;
+  onDeselectAllImages?: (sceneId: string) => void;
   onExcludeScene: (sceneId: string) => void;
   onRestoreScene: (sceneId: string) => void;
   canProceedToPackaging: () => boolean;
@@ -46,12 +55,20 @@ export const ClipsReview: React.FC<ClipsReviewProps> = ({
   options,
   searchStateByScene,
   imageSearchStateByScene = {},
+  selectedVideoClipIdsByScene = {},
+  selectedImageIdsByScene = {},
   excludedSceneIds,
   pexelsApiKey,
   onSearchAll,
   onSearchScene,
   onSearchAllImages,
   onSearchSceneImages,
+  onToggleSelectClip,
+  onToggleSelectImage,
+  onSelectAllClips,
+  onDeselectAllClips,
+  onSelectAllImages,
+  onDeselectAllImages,
   onExcludeScene,
   onRestoreScene,
   canProceedToPackaging,
@@ -241,6 +258,10 @@ export const ClipsReview: React.FC<ClipsReviewProps> = ({
                 scene={scene}
                 searchState={searchStateByScene[scene.id]}
                 isExcluded={excludedSceneIds.includes(scene.id)}
+                selectedClipIds={selectedVideoClipIdsByScene[scene.id]}
+                onToggleSelectClip={(candidateId) => onToggleSelectClip?.(scene.id, candidateId)}
+                onSelectAllClips={() => onSelectAllClips?.(scene.id)}
+                onDeselectAllClips={() => onDeselectAllClips?.(scene.id)}
                 onReSearch={(customQuery) => onSearchScene(scene.id, pexelsApiKey, customQuery)}
                 onExcludeScene={() => onExcludeScene(scene.id)}
                 onRestoreScene={() => onRestoreScene(scene.id)}
@@ -252,6 +273,10 @@ export const ClipsReview: React.FC<ClipsReviewProps> = ({
               <ImageResultsCard
                 scene={scene}
                 imageState={imageSearchStateByScene[scene.id]}
+                selectedImageIds={selectedImageIdsByScene[scene.id]}
+                onToggleSelectImage={(photoId) => onToggleSelectImage?.(scene.id, photoId)}
+                onSelectAllImages={() => onSelectAllImages?.(scene.id)}
+                onDeselectAllImages={() => onDeselectAllImages?.(scene.id)}
                 onReSearch={(customQuery) => onSearchSceneImages?.(scene.id, pexelsApiKey, customQuery)}
               />
             )}
@@ -363,10 +388,22 @@ export const ClipsReview: React.FC<ClipsReviewProps> = ({
 interface ImageResultsCardProps {
   scene: Scene;
   imageState: ImageSearchState | undefined;
+  selectedImageIds?: number[];
+  onToggleSelectImage?: (photoId: number) => void;
+  onSelectAllImages?: () => void;
+  onDeselectAllImages?: () => void;
   onReSearch: (customQuery?: string) => void;
 }
 
-const ImageResultsCard: React.FC<ImageResultsCardProps> = ({ scene, imageState, onReSearch }) => {
+const ImageResultsCard: React.FC<ImageResultsCardProps> = ({
+  scene,
+  imageState,
+  selectedImageIds,
+  onToggleSelectImage,
+  onSelectAllImages,
+  onDeselectAllImages,
+  onReSearch,
+}) => {
   const [editingQuery, setEditingQuery] = useState(false);
   const [draftQuery, setDraftQuery] = useState('');
   const [lightboxCandidate, setLightboxCandidate] = useState<{
@@ -454,6 +491,41 @@ const ImageResultsCard: React.FC<ImageResultsCardProps> = ({ scene, imageState, 
             </div>
           )}
         </div>
+
+        {/* Image Selection Toolbar */}
+        {status === 'ready' && candidates.length > 0 && (
+          <div className="media-selection-toolbar mt-2 flex items-center justify-between flex-wrap gap-2">
+            <span className="badge badge-subtle selection-count-badge">
+              {selectedImageIds
+                ? `${candidates.filter((c) => selectedImageIds.includes(c.pexelsPhotoId)).length} of ${candidates.length} selected`
+                : `${candidates.length} of ${candidates.length} selected`}
+            </span>
+            {(onSelectAllImages || onDeselectAllImages) && (
+              <div className="selection-actions-bar flex items-center gap-2">
+                {onSelectAllImages && (
+                  <button
+                    type="button"
+                    className="btn btn-xs btn-outline"
+                    onClick={onSelectAllImages}
+                    title="Select all images"
+                  >
+                    Select All
+                  </button>
+                )}
+                {onDeselectAllImages && (
+                  <button
+                    type="button"
+                    className="btn btn-xs btn-outline"
+                    onClick={onDeselectAllImages}
+                    title="Deselect all images"
+                  >
+                    Deselect All
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Image grid */}
@@ -508,8 +580,16 @@ const ImageResultsCard: React.FC<ImageResultsCardProps> = ({ scene, imageState, 
                 }
               };
 
+              const isSelected = selectedImageIds
+                ? selectedImageIds.includes(candidate.pexelsPhotoId)
+                : true;
+
               return (
-                <div key={candidate.pexelsPhotoId} className="clip-candidate-card" id={`image-card-${candidate.pexelsPhotoId}`}>
+                <div
+                  key={candidate.pexelsPhotoId}
+                  className={`clip-candidate-card ${isSelected ? 'is-selected' : 'is-unselected'}`}
+                  id={`image-card-${candidate.pexelsPhotoId}`}
+                >
                   <div
                     className="clip-media-container"
                     style={{ aspectRatio: candidate.width >= candidate.height ? '16 / 9' : '9 / 16', cursor: 'pointer' }}
@@ -525,6 +605,25 @@ const ImageResultsCard: React.FC<ImageResultsCardProps> = ({ scene, imageState, 
                     <div className="clip-candidate-label-badge" title={`Option ${label}`}>
                       <span>Option {label}</span>
                     </div>
+
+                    {/* Selection Checkbox */}
+                    {onToggleSelectImage && (
+                      <button
+                        type="button"
+                        className={`clip-card-checkbox-btn ${isSelected ? 'checked' : ''}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onToggleSelectImage(candidate.pexelsPhotoId);
+                        }}
+                        role="checkbox"
+                        aria-checked={isSelected}
+                        title={isSelected ? `Uncheck Option ${label} (exclude from export)` : `Check Option ${label} (include in export)`}
+                        aria-label={`Select Option ${label}`}
+                      >
+                        {isSelected && <Check size={13} strokeWidth={3} />}
+                      </button>
+                    )}
+
                     <button
                       type="button"
                       className="clip-overlay-download-btn"

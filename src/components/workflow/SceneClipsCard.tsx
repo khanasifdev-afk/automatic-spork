@@ -16,6 +16,10 @@ interface SceneClipsCardProps {
   scene: Scene;
   searchState?: SceneSearchState;
   isExcluded: boolean;
+  selectedClipIds?: string[];
+  onToggleSelectClip?: (candidateId: string) => void;
+  onSelectAllClips?: () => void;
+  onDeselectAllClips?: () => void;
   onSelectCandidate?: (candidateId: string) => void;
   onReSearch: (customQuery: string) => void;
   onExcludeScene: () => void;
@@ -26,6 +30,10 @@ export const SceneClipsCard: React.FC<SceneClipsCardProps> = ({
   scene,
   searchState,
   isExcluded,
+  selectedClipIds,
+  onToggleSelectClip,
+  onSelectAllClips,
+  onDeselectAllClips,
   onReSearch,
   onExcludeScene,
   onRestoreScene,
@@ -263,24 +271,57 @@ export const SceneClipsCard: React.FC<SceneClipsCardProps> = ({
           {/* Search State: Ready with 6 Candidates */}
           {status === 'ready' && candidates.length >= 6 && (
             <div className="scene-candidates-wrapper">
-              <div className="scene-clips-grid-header mb-2 flex items-center justify-between">
-                <h4 className="section-label font-medium text-sm">
-                  Ranked Video Options (6 Candidates A–F):
-                </h4>
-                <span className="text-muted text-xs">
-                  All 6 options are displayed and will be exported
-                </span>
+              <div className="scene-clips-grid-header mb-2 flex items-center justify-between flex-wrap gap-2">
+                <div className="flex items-center gap-2">
+                  <h4 className="section-label font-medium text-sm">
+                    Ranked Video Options (6 Candidates A–F):
+                  </h4>
+                  <span className="badge badge-subtle selection-count-badge">
+                    {selectedClipIds
+                      ? `${candidates.slice(0, 6).filter((c) => selectedClipIds.includes(c.id)).length} of 6 selected`
+                      : '6 of 6 selected'}
+                  </span>
+                </div>
+                {(onSelectAllClips || onDeselectAllClips) && (
+                  <div className="selection-actions-bar flex items-center gap-2">
+                    {onSelectAllClips && (
+                      <button
+                        type="button"
+                        className="btn btn-xs btn-outline"
+                        onClick={onSelectAllClips}
+                        title="Select all 6 video clips for export"
+                      >
+                        Select All
+                      </button>
+                    )}
+                    {onDeselectAllClips && (
+                      <button
+                        type="button"
+                        className="btn btn-xs btn-outline"
+                        onClick={onDeselectAllClips}
+                        title="Deselect all clips"
+                      >
+                        Deselect All
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div className="scene-all-clips-grid">
-                {candidates.slice(0, 6).map((candidate, idx) => (
-                  <ClipCard
-                    key={candidate.id}
-                    candidate={candidate}
-                    candidateLabel={candidate.candidateLabel || (['A', 'B', 'C', 'D', 'E', 'F'] as const)[idx]}
-                    rank={idx + 1}
-                  />
-                ))}
+                {candidates.slice(0, 6).map((candidate, idx) => {
+                  const isSelected = selectedClipIds ? selectedClipIds.includes(candidate.id) : true;
+                  return (
+                    <ClipCard
+                      key={candidate.id}
+                      candidate={candidate}
+                      candidateLabel={candidate.candidateLabel || (['A', 'B', 'C', 'D', 'E', 'F'] as const)[idx]}
+                      rank={idx + 1}
+                      isSelected={isSelected}
+                      onSelect={onToggleSelectClip ? () => onToggleSelectClip(candidate.id) : undefined}
+                    />
+                  );
+                })}
               </div>
             </div>
           )}

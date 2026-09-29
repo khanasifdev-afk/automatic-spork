@@ -54,6 +54,14 @@ export const WorkspacePage: React.FC = () => {
     searchScene,
     searchAllImages,
     searchSceneImages,
+    selectedVideoClipIdsByScene,
+    selectedImageIdsByScene,
+    toggleVideoClipSelection,
+    toggleImageSelection,
+    selectAllVideoClips,
+    deselectAllVideoClips,
+    selectAllImages,
+    deselectAllImages,
     excludeScene,
     restoreScene,
     canProceedToPackaging,
@@ -316,12 +324,20 @@ export const WorkspacePage: React.FC = () => {
             options={options}
             searchStateByScene={searchStateByScene}
             imageSearchStateByScene={imageSearchStateByScene}
+            selectedVideoClipIdsByScene={selectedVideoClipIdsByScene}
+            selectedImageIdsByScene={selectedImageIdsByScene}
             excludedSceneIds={excludedSceneIds}
             pexelsApiKey={pexelsApiKey}
             onSearchAll={searchAllScenes}
             onSearchScene={searchScene}
             onSearchAllImages={searchAllImages}
             onSearchSceneImages={searchSceneImages}
+            onToggleSelectClip={toggleVideoClipSelection}
+            onToggleSelectImage={toggleImageSelection}
+            onSelectAllClips={selectAllVideoClips}
+            onDeselectAllClips={deselectAllVideoClips}
+            onSelectAllImages={selectAllImages}
+            onDeselectAllImages={deselectAllImages}
             onExcludeScene={excludeScene}
             onRestoreScene={restoreScene}
             canProceedToPackaging={canProceedToPackaging}

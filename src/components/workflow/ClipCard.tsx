@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { Play, Pause, ExternalLink, VideoOff, Download, Loader2 } from 'lucide-react';
+import { Play, Pause, ExternalLink, VideoOff, Download, Loader2, Check } from 'lucide-react';
 import { ClipCandidate } from '../../types';
 import { triggerBrowserDownload } from '../../services/zipBuilder';
 
@@ -16,6 +16,8 @@ export const ClipCard: React.FC<ClipCardProps> = ({
   candidate,
   candidateLabel,
   rank,
+  isSelected = true,
+  onSelect,
 }) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isManuallyPlaying, setIsManuallyPlaying] = useState(false);
@@ -143,7 +145,7 @@ export const ClipCard: React.FC<ClipCardProps> = ({
 
   return (
     <div
-      className="clip-candidate-card"
+      className={`clip-candidate-card ${isSelected ? 'is-selected' : 'is-unselected'}`}
       id={`clip-card-${candidate.id}`}
       aria-label={`Video clip ${displayLabel ? `Option ${displayLabel} ` : ''}by ${candidate.creatorName}, ${candidate.durationSeconds} seconds, ${orientationText}`}
     >
@@ -200,6 +202,24 @@ export const ClipCard: React.FC<ClipCardProps> = ({
           >
             <span>Option {displayLabel}</span>
           </div>
+        )}
+
+        {/* Selection Checkbox */}
+        {onSelect && (
+          <button
+            type="button"
+            className={`clip-card-checkbox-btn ${isSelected ? 'checked' : ''}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onSelect();
+            }}
+            role="checkbox"
+            aria-checked={isSelected}
+            title={isSelected ? `Uncheck Option ${displayLabel || ''} (exclude from export)` : `Check Option ${displayLabel || ''} (include in export)`}
+            aria-label={`Select Option ${displayLabel || ''}`}
+          >
+            {isSelected && <Check size={13} strokeWidth={3} />}
+          </button>
         )}
 
         {/* Play / Pause Toggle Button */}

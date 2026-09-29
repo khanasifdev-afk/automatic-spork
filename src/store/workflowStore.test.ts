@@ -591,6 +591,78 @@ describe('workflowStore', () => {
       expect(useWorkflowStore.getState().proceedToPackaging()).toBe(true);
       expect(useWorkflowStore.getState().step).toBe('packaging');
     });
+
+    it('handles video and image selection actions properly', () => {
+      const candidates = createSixMockCandidates(1, 'ocean waves');
+      useWorkflowStore.setState({
+        searchStateByScene: {
+          'scene-1': {
+            status: 'ready',
+            query: 'ocean waves',
+            candidates,
+            selectedCandidateId: 'clip-101',
+            error: null,
+          },
+        },
+        imageSearchStateByScene: {
+          'scene-1': {
+            status: 'ready',
+            query: 'ocean waves',
+            candidates: [
+              {
+                id: 'img-1',
+                pexelsPhotoId: 501,
+                sourceUrl: 'https://pexels.com/501',
+                creatorName: 'PhotoCreator',
+                creatorUrl: '',
+                previewImageUrl: '',
+                width: 1920,
+                height: 1080,
+                files: [],
+                matchedQuery: 'ocean waves',
+                score: 90,
+                confidence: 'strong',
+              },
+            ],
+            error: null,
+          },
+        },
+        selectedVideoClipIdsByScene: {
+          'scene-1': ['clip-101', 'clip-102'],
+        },
+        selectedImageIdsByScene: {
+          'scene-1': [501],
+        },
+      });
+
+      // Toggle unselected clip in -> added
+      useWorkflowStore.getState().toggleVideoClipSelection('scene-1', 'clip-103');
+      expect(useWorkflowStore.getState().selectedVideoClipIdsByScene['scene-1']).toContain('clip-103');
+
+      // Toggle selected clip out -> removed
+      useWorkflowStore.getState().toggleVideoClipSelection('scene-1', 'clip-101');
+      expect(useWorkflowStore.getState().selectedVideoClipIdsByScene['scene-1']).not.toContain('clip-101');
+
+      // Select all clips
+      useWorkflowStore.getState().selectAllVideoClips('scene-1');
+      expect(useWorkflowStore.getState().selectedVideoClipIdsByScene['scene-1']).toHaveLength(6);
+
+      // Deselect all clips
+      useWorkflowStore.getState().deselectAllVideoClips('scene-1');
+      expect(useWorkflowStore.getState().selectedVideoClipIdsByScene['scene-1']).toHaveLength(0);
+
+      // Image selection toggle
+      useWorkflowStore.getState().toggleImageSelection('scene-1', 501);
+      expect(useWorkflowStore.getState().selectedImageIdsByScene['scene-1']).toHaveLength(0);
+
+      // Image select all
+      useWorkflowStore.getState().selectAllImages('scene-1');
+      expect(useWorkflowStore.getState().selectedImageIdsByScene['scene-1']).toEqual([501]);
+
+      // Image deselect all
+      useWorkflowStore.getState().deselectAllImages('scene-1');
+      expect(useWorkflowStore.getState().selectedImageIdsByScene['scene-1']).toHaveLength(0);
+    });
   });
 
   describe('Feature 4: Export and Packaging Actions', () => {
